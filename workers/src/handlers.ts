@@ -6,6 +6,7 @@
  * - MESSAGE_COMPONENT (type=3): 버튼 클릭
  *
  * 버튼 클릭 시 원본 메시지의 "현재 입금 현황" 필드를 갱신합니다 (UPDATE_MESSAGE).
+ * 모임 인원수 등 도메인 설정은 KV에서 읽습니다 (Notifier와 SSoT 공유).
  */
 
 import {
@@ -16,6 +17,7 @@ import {
   MessageFlags,
 } from './types';
 import { DepositStore, getCurrentMonthKey, DepositMap } from './store';
+import { ConfigStore } from './config_store';
 
 export interface Env {
   DISCORD_PUBLIC_KEY: string;
@@ -23,7 +25,7 @@ export interface Env {
   DISCORD_APP_ID: string;
   DEPOSITS_KV: KVNamespace;
   TIMEZONE?: string;
-  MEMBERS_COUNT?: string;  // wrangler.toml의 [vars]에서 주입. 기본값 "5".
+  // MEMBERS_COUNT는 더 이상 환경변수가 아닙니다 (KV의 config:members_count 사용)
 }
 
 const DEPOSIT_STATUS_FIELD_NAME = '현재 입금 현황';
@@ -33,6 +35,7 @@ export async function handleInteraction(
   env: Env,
 ): Promise<Response> {
   const store = new DepositStore(env.DEPOSITS_KV);
+  const configStore = new ConfigStore(env.DEPOSITS_KV);
   const user = interaction.member?.user ?? interaction.user;
 
   if (!user) {
@@ -62,10 +65,10 @@ export async function handleInteraction(
     const customId = interaction.data?.custom_id;
 
     if (customId === 'mark_paid') {
-      return await handlePaidToggle(store, interaction, user.id, user.global_name ?? user.username, true, env);
+      return await handlePaidToggle(store, configStore, interaction, user.id, user.global_name ?? user.username, true);
     }
     if (customId === 'unmark_paid') {
-      return await handlePaidToggle(store, interaction, user.id, user.global_name ?? user.username, false, env);
+      return await handlePaidToggle(store, configStore, interaction, user.id, user.global_name ?? user.username, false);
     }
     if (customId === 'show_status') {
       return await handleStatus(store);
@@ -89,18 +92,18 @@ export async function handleInteraction(
  */
 async function handlePaidToggle(
   store: DepositStore,
+  configStore: ConfigStore,
   interaction: DiscordInteraction,
   userId: string,
   username: string,
   paid: boolean,
-  env: Env,
 ): Promise<Response> {
   const monthKey = getCurrentMonthKey();
   const updatedData = paid
     ? await store.markPaid(monthKey, userId, username)
     : await store.unmarkPaid(monthKey, userId);
 
-  const membersCount = parseInt(env.MEMBERS_COUNT ?? '5', 10);
+  const membersCount = await configStore.getMembersCount();
 
   // 원본 메시지에 embed가 없거나 message 자체가 없으면 fallback (ephemeral 응답)
   const originalEmbed = interaction.message?.embeds?.[0];

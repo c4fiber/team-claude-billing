@@ -13,10 +13,9 @@ compatibility_date = "2026-04-29"
 binding = "DEPOSITS_KV"
 id = "c009f42b5477438988a573d43dfb5883"
 
-# 환경 변수 (비밀이 아닌 값만)
+# 환경 변수 (비밀이 아닌 값만 — 도메인 설정은 KV의 config:* 키 사용)
 [vars]
 TIMEZONE = "Asia/Seoul"
-MEMBERS_COUNT = "5"
 
 # 비밀 값은 wrangler secret으로 등록:
 #   npx wrangler secret put DISCORD_PUBLIC_KEY
