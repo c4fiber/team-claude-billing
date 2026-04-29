@@ -70,9 +70,6 @@ export async function handleInteraction(
     if (customId === 'unmark_paid') {
       return await handlePaidToggle(store, configStore, interaction, user.id, user.global_name ?? user.username, false);
     }
-    if (customId === 'show_status') {
-      return await handleStatus(store);
-    }
   }
 
   return jsonResponse({
@@ -196,7 +193,6 @@ async function handleHelp(): Promise<Response> {
   const content = [
     '📖 **사용 가능한 명령어**',
     '',
-    '`/status` — 이번 달 입금 현황 조회',
     '`/rate` — 환율 안내',
     '`/help` — 이 도움말',
     '',

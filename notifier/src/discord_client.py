@@ -94,13 +94,7 @@ def post_billing_alert(
                     "style": 4,  # DANGER
                     "label": "↩️ 취소",
                     "custom_id": "unmark_paid",
-                },
-                {
-                    "type": 2,
-                    "style": 2,  # SECONDARY
-                    "label": "📊 현황",
-                    "custom_id": "show_status",
-                },
+                }
             ],
         }
     ]
