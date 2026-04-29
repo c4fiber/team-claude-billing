@@ -11,7 +11,7 @@ compatibility_date = "2026-04-29"
 # 생성 후 출력되는 id를 아래에 붙여넣으세요.
 [[kv_namespaces]]
 binding = "DEPOSITS_KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "c009f42b5477438988a573d43dfb5883"
 
 # 환경 변수 (비밀이 아닌 값만)
 [vars]
