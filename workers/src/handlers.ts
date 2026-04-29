@@ -4,9 +4,12 @@
  * 두 가지 종류:
  * - APPLICATION_COMMAND (type=2): 슬래시 커맨드 (/현황, /환율 등)
  * - MESSAGE_COMPONENT (type=3): 버튼 클릭
+ *
+ * 버튼 클릭 시 원본 메시지의 "현재 입금 현황" 필드를 갱신합니다 (UPDATE_MESSAGE).
  */
 
 import {
+  DiscordEmbed,
   DiscordInteraction,
   InteractionResponseType,
   InteractionType,
@@ -20,7 +23,10 @@ export interface Env {
   DISCORD_APP_ID: string;
   DEPOSITS_KV: KVNamespace;
   TIMEZONE?: string;
+  MEMBERS_COUNT?: string;  // wrangler.toml의 [vars]에서 주입. 기본값 "5".
 }
+
+const DEPOSIT_STATUS_FIELD_NAME = '현재 입금 현황';
 
 export async function handleInteraction(
   interaction: DiscordInteraction,
@@ -56,10 +62,10 @@ export async function handleInteraction(
     const customId = interaction.data?.custom_id;
 
     if (customId === 'mark_paid') {
-      return await handleMarkPaid(store, user.id, user.global_name ?? user.username);
+      return await handlePaidToggle(store, interaction, user.id, user.global_name ?? user.username, true, env);
     }
     if (customId === 'unmark_paid') {
-      return await handleUnmarkPaid(store, user.id);
+      return await handlePaidToggle(store, interaction, user.id, user.global_name ?? user.username, false, env);
     }
     if (customId === 'show_status') {
       return await handleStatus(store);
@@ -72,34 +78,93 @@ export async function handleInteraction(
   });
 }
 
-async function handleMarkPaid(
+/**
+ * 입금 체크/취소를 처리하고 원본 메시지를 갱신합니다.
+ *
+ * 흐름:
+ * 1. KV에 상태 변경 저장
+ * 2. 갱신된 KV 데이터로 "현재 입금 현황" 필드 재계산
+ * 3. 원본 embed의 해당 필드만 교체 (다른 필드는 그대로)
+ * 4. UPDATE_MESSAGE로 응답 → Discord가 원본 메시지를 새 embed로 교체
+ */
+async function handlePaidToggle(
   store: DepositStore,
+  interaction: DiscordInteraction,
   userId: string,
   username: string,
+  paid: boolean,
+  env: Env,
 ): Promise<Response> {
   const monthKey = getCurrentMonthKey();
-  await store.markPaid(monthKey, userId, username);
+  const updatedData = paid
+    ? await store.markPaid(monthKey, userId, username)
+    : await store.unmarkPaid(monthKey, userId);
+
+  const membersCount = parseInt(env.MEMBERS_COUNT ?? '5', 10);
+
+  // 원본 메시지에 embed가 없거나 message 자체가 없으면 fallback (ephemeral 응답)
+  const originalEmbed = interaction.message?.embeds?.[0];
+  if (!originalEmbed) {
+    return jsonResponse({
+      type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        content: paid
+          ? `✅ ${username}님 ${monthKey} 입금 확인되었습니다.`
+          : `↩️ ${monthKey} 입금 체크가 취소되었습니다.`,
+        flags: MessageFlags.EPHEMERAL,
+      },
+    });
+  }
+
+  const updatedEmbed = updateDepositField(originalEmbed, updatedData, membersCount);
 
   return jsonResponse({
-    type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+    type: InteractionResponseType.UPDATE_MESSAGE,
     data: {
-      content: `✅ **${username}** 님 ${monthKey} 입금 확인되었습니다.`,
-      flags: MessageFlags.EPHEMERAL, // 본인에게만
+      embeds: [updatedEmbed],
+      // components는 명시하지 않으면 Discord가 원본 그대로 유지함
     },
   });
 }
 
-async function handleUnmarkPaid(store: DepositStore, userId: string): Promise<Response> {
-  const monthKey = getCurrentMonthKey();
-  await store.unmarkPaid(monthKey, userId);
-
-  return jsonResponse({
-    type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-    data: {
-      content: `↩️ ${monthKey} 입금 체크가 취소되었습니다.`,
-      flags: MessageFlags.EPHEMERAL,
-    },
+/**
+ * embed의 "현재 입금 현황" 필드를 갱신합니다.
+ * 다른 필드와 메타정보(title, description, color 등)는 모두 보존.
+ */
+function updateDepositField(
+  embed: DiscordEmbed,
+  data: DepositMap,
+  membersCount: number,
+): DiscordEmbed {
+  const fields = embed.fields ?? [];
+  const newFields = fields.map((field) => {
+    if (field.name === DEPOSIT_STATUS_FIELD_NAME) {
+      return { ...field, value: renderDepositStatusValue(data, membersCount) };
+    }
+    return field;
   });
+
+  return { ...embed, fields: newFields };
+}
+
+/**
+ * "현재 입금 현황" 필드의 value를 렌더링합니다.
+ * notifier의 _render_deposit_status와 출력 형식이 일치해야 함.
+ */
+function renderDepositStatusValue(data: DepositMap, membersCount: number): string {
+  const paidUsers = Object.values(data)
+    .filter((d) => d.paid)
+    .map((d) => d.username);
+
+  if (paidUsers.length === 0) {
+    return `⬜ 0 / ${membersCount} (아직 입금 체크 없음)`;
+  }
+
+  const lines = [`✅ ${paidUsers.length} / ${membersCount}`];
+  for (const name of paidUsers) {
+    lines.push(`  • ${name}`);
+  }
+  return lines.join('\n');
 }
 
 async function handleStatus(store: DepositStore): Promise<Response> {
@@ -114,9 +179,6 @@ async function handleStatus(store: DepositStore): Promise<Response> {
 }
 
 async function handleRate(): Promise<Response> {
-  // 환율은 외부 API 호출이 필요하므로 DEFERRED 응답 후 follow-up
-  // 단순화를 위해 여기서는 안내 메시지만 반환.
-  // (실제 환율 알림은 GitHub Actions의 정기 실행에서 발송)
   return jsonResponse({
     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
     data: {
