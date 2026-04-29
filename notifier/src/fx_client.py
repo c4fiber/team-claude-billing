@@ -19,7 +19,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 KST = ZoneInfo("Asia/Seoul")
-EXIM_URL = "https://www.koreaexim.go.kr/site/program/financial/exchangeJSON"
+EXIM_URL = "https://oapi.koreaexim.go.kr/site/program/financial/exchangeJSON"
 
 
 class ExchangeRateError(Exception):
