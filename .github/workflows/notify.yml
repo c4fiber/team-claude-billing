@@ -1,0 +1,76 @@
+name: Billing Notifier
+
+on:
+  schedule:
+    # 매일 09:00 KST = 00:00 UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '실행 모드'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options:
+          - auto
+          - billing-alert
+          - monthly-report
+          - dry-run
+      force_days:
+        description: '강제 D-N 알림 (billing-alert 모드일 때만)'
+        required: false
+        type: string
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # surplus.json 자동 커밋용
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        working-directory: notifier
+        run: uv sync
+
+      - name: Run notifier
+        working-directory: notifier
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          KOREAEXIM_API_KEY: ${{ secrets.KOREAEXIM_API_KEY }}
+          MEMBERS_COUNT: ${{ vars.MEMBERS_COUNT || '5' }}
+          USD_PER_SEAT: ${{ vars.USD_PER_SEAT || '25.0' }}
+          VAT_RATE: ${{ vars.VAT_RATE || '0.10' }}
+          SAFETY_MARGIN: ${{ vars.SAFETY_MARGIN || '0.05' }}
+          BILLING_DAY: ${{ vars.BILLING_DAY || '15' }}
+        run: |
+          MODE="${{ github.event.inputs.mode || 'auto' }}"
+          FORCE_DAYS="${{ github.event.inputs.force_days }}"
+          if [ -n "$FORCE_DAYS" ]; then
+            uv run python -m src.main --mode "$MODE" --force-days "$FORCE_DAYS"
+          else
+            uv run python -m src.main --mode "$MODE"
+          fi
+
+      - name: Commit surplus history (if changed)
+        run: |
+          if [[ -n "$(git status --porcelain data/)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add data/
+            git commit -m "chore(notifier): update surplus history [skip ci]"
+            git push
+          fi
