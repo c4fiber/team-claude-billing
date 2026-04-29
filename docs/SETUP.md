@@ -52,9 +52,35 @@ npx wrangler login
 npx wrangler kv:namespace create DEPOSITS_KV
 ```
 
+⚠️ wrangler 버전에 따라 명령어가 다릅니다:
+- v3 이전: `kv:namespace create` (콜론)
+- v3 이후: `kv namespace create` (공백)
+
 출력된 `id`를 `wrangler.toml`의 `REPLACE_WITH_KV_NAMESPACE_ID` 자리에 붙여넣기.
 
-### 2-3. 비밀 값 등록
+### 2-3. 도메인 설정 등록 (`config:members_count`)
+
+KV는 입금 상태뿐 아니라 **도메인 설정의 SSoT** 역할도 합니다.
+인원수는 Workers와 Notifier 양쪽이 이 값을 읽으므로 단일 관리됩니다.
+
+```bash
+# wrangler.toml에 등록한 KV id를 변수로
+KV_ID=$(grep '^id =' wrangler.toml | cut -d'"' -f2)
+
+# 인원수 등록 (예: 5명) — --remote는 production KV를 의미
+npx wrangler kv key put --namespace-id="$KV_ID" "config:members_count" "5" --remote
+
+# 검증
+npx wrangler kv key get --namespace-id="$KV_ID" "config:members_count" --remote --text
+# → 5
+```
+
+⚠️ **`--remote` 없이 실행하면 로컬 시뮬레이터에만 등록되고 production Workers는 이 값을 못 봅니다.** 자세한 내용은 [OPERATIONS.md](./OPERATIONS.md)의 "모든 KV 명령어에 `--remote` 필수" 섹션 참고.
+
+> 향후 인원 변경 시 같은 명령을 다시 실행하면 됩니다. Workers 재배포 불필요.
+> 자세한 운영 명령은 [OPERATIONS.md](./OPERATIONS.md) 참고.
+
+### 2-4. 비밀 값 등록
 
 ```bash
 npx wrangler secret put DISCORD_PUBLIC_KEY
@@ -67,7 +93,7 @@ npx wrangler secret put DISCORD_APP_ID
 # → 1번에서 메모한 Application ID
 ```
 
-### 2-4. 배포
+### 2-5. 배포
 
 ```bash
 npx wrangler deploy
@@ -76,7 +102,7 @@ npx wrangler deploy
 배포 후 출력되는 URL을 메모합니다.
 예: `https://team-claude-billing.your-subdomain.workers.dev`
 
-### 2-5. Discord에 Interactions Endpoint 등록
+### 2-6. Discord에 Interactions Endpoint 등록
 
 1. Developer Portal → 앱 → **General Information**
 2. **Interactions Endpoint URL**에 위 Workers URL 붙여넣기
@@ -85,7 +111,7 @@ npx wrangler deploy
 > Discord가 즉시 PING 요청을 보내 검증합니다. 검증 실패 시 저장되지 않습니다.
 > 실패하면 `npx wrangler tail`로 실시간 로그를 보며 디버깅.
 
-### 2-6. 슬래시 커맨드 등록
+### 2-7. 슬래시 커맨드 등록
 
 ```bash
 # .env 파일을 workers/에 만들거나 export로 환경변수 설정
@@ -142,11 +168,12 @@ https://www.koreaexim.go.kr/ir/HPHKIR020M01?apino=2&viewtype=C
 **Variables** (공개 가능, 선택):
 | Name | Default | 설명 |
 |------|---------|------|
-| `MEMBERS_COUNT` | `5` | 모임 인원 |
 | `USD_PER_SEAT` | `25.0` | Team Standard 월간 |
 | `VAT_RATE` | `0.10` | 한국 부가세 |
 | `SAFETY_MARGIN` | `0.05` | 안전 마진 |
 | `BILLING_DAY` | `15` | 매월 결제일 |
+
+> **참고**: 인원수(`MEMBERS_COUNT`)는 GitHub Variables가 아닌 **KV의 `config:members_count`**에서 읽습니다 (2-3 단계에서 등록). Workers와 Notifier가 같은 KV 값을 참조하는 SSoT 구조입니다. 변경 운영은 [OPERATIONS.md](./OPERATIONS.md) 참고.
 
 ### 3-5. 첫 dry-run 테스트
 
@@ -168,10 +195,10 @@ https://www.koreaexim.go.kr/ir/HPHKIR020M01?apino=2&viewtype=C
 ### 결제 후 정산
 
 1. 실제 카드 청구액(KRW)이 명세서에 찍히면 다음 명령으로 잉여금 기록:
-   ```bash
+```bash
    # data/surplus.json을 직접 편집해 actual_charge_krw 추가
    # 다음 달 자동 차감됨
-   ```
+```
 2. 또는 별도 admin 슬래시 커맨드를 추가해도 됨 (확장 과제)
 
 ---
@@ -199,6 +226,13 @@ cd workers && npx wrangler tail
 
 ### KV에 입금 데이터가 안 쌓임
 → `wrangler tail`로 버튼 클릭 시 로그 확인. 서명 검증 통과 여부 점검.
+
+### 인원수가 알림 메시지에 반영 안 됨
+→ `config:members_count`가 production KV에 등록되었는지 확인:
+```bash
+npx wrangler kv key get --namespace-id="$KV_ID" "config:members_count" --remote --text
+```
+→ 키가 없으면 `--remote` 플래그로 다시 등록. 자세한 내용은 [OPERATIONS.md](./OPERATIONS.md).
 
 ---
 
