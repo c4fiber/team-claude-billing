@@ -42,22 +42,6 @@ jobs:
         working-directory: notifier
         run: uv sync
 
-      - name: Debug — secrets injection check
-        env:
-          BOT_TOKEN_LEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          CHANNEL_ID_LEN: ${{ secrets.DISCORD_CHANNEL_ID }}
-          CF_ACCOUNT_LEN: ${{ secrets.CF_ACCOUNT_ID }}
-          CF_KV_LEN: ${{ secrets.CF_KV_NAMESPACE_ID }}
-          CF_TOKEN_LEN: ${{ secrets.CF_API_TOKEN }}
-          EXIM_LEN: ${{ secrets.KOREAEXIM_API_KEY }}
-        run: |
-          echo "DISCORD_BOT_TOKEN length: ${#BOT_TOKEN_LEN}"
-          echo "DISCORD_CHANNEL_ID length: ${#CHANNEL_ID_LEN}"
-          echo "CF_ACCOUNT_ID length: ${#CF_ACCOUNT_LEN}"
-          echo "CF_KV_NAMESPACE_ID length: ${#CF_KV_LEN}"
-          echo "CF_API_TOKEN length: ${#CF_TOKEN_LEN}"
-          echo "KOREAEXIM_API_KEY length: ${#EXIM_LEN}"
-
       - name: Run notifier
         working-directory: notifier
         env:
