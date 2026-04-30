@@ -51,8 +51,7 @@ jobs:
           CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           KOREAEXIM_API_KEY: ${{ secrets.KOREAEXIM_API_KEY }}
-          MEMBERS_COUNT: ${{ vars.MEMBERS_COUNT || '5' }}
-          USD_PER_SEAT: ${{ vars.USD_PER_SEAT || '25.0' }}
+          # 시트 구성/가격은 KV의 config:* 키에서 읽음 (Workers와 SSoT)
           VAT_RATE: ${{ vars.VAT_RATE || '0.10' }}
           SAFETY_MARGIN: ${{ vars.SAFETY_MARGIN || '0.05' }}
           BILLING_DAY: ${{ vars.BILLING_DAY || '15' }}
