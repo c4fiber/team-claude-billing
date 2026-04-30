@@ -33,13 +33,24 @@ def post_billing_alert(
     days_until_billing: int,
     billing_date_str: str,
 ) -> None:
-    """결제 알림 메시지 발송 (버튼 포함)."""
+    """결제 알림 메시지 발송 (버튼 포함, 시트 tier별 분담)."""
     color = COLOR_WARN if days_until_billing <= 3 else COLOR_INFO
 
     title = f"💰 {billing_date_str} 결제 알림 (D-{days_until_billing})"
 
+    # 인당 입금액 — tier별로 표시
+    amount_lines = []
+    if calc.standard.seat_count > 0:
+        amount_lines.append(
+            f"**Standard ({calc.standard.seat_count}명)**: 인당 `{calc.standard.per_person_krw:,}원`"
+        )
+    if calc.premium.seat_count > 0:
+        amount_lines.append(
+            f"**Premium ({calc.premium.seat_count}명)**: 인당 `{calc.premium.per_person_krw:,}원`"
+        )
+
     description_lines = [
-        f"**인당 입금액: {calc.per_person_krw:,}원**",
+        *amount_lines,
         "",
         f"적용 환율: `{calc.fx_rate:,.2f}` KRW/USD",
         f"안전 마진: {calc.safety_margin * 100:.0f}% (환율·수수료 변동 대비)",
@@ -54,7 +65,7 @@ def post_billing_alert(
         "color": color,
         "fields": [
             {
-                "name": "총 청구 (USD)",
+                "name": "총 청구 (USD, VAT 포함)",
                 "value": f"${calc.total_usd:.2f}",
                 "inline": True,
             },
@@ -70,12 +81,14 @@ def post_billing_alert(
             },
             {
                 "name": "현재 입금 현황",
-                "value": _render_deposit_status(deposits, calc.members_count),
+                "value": _render_deposit_status(deposits, calc.total_seats),
                 "inline": False,
             },
         ],
         "footer": {
-            "text": f"{deposits.month_key} • 잉여금은 다음 달 입금액에서 자동 차감",
+            "text": (
+                f"{deposits.month_key} • 본인 시트 종류 확인 후 입금 → [✅ 입금완료] 버튼 클릭"
+            ),
         },
     }
 
@@ -94,7 +107,7 @@ def post_billing_alert(
                     "style": 4,  # DANGER
                     "label": "↩️ 취소",
                     "custom_id": "unmark_paid",
-                }
+                },
             ],
         }
     ]
@@ -107,9 +120,9 @@ def post_monthly_report(
     channel_id: str,
     fx_rate: float,
     fx_history_30d: list[tuple[str, float]],
-    next_month_estimate: int,
+    next_month_calc: BillingCalculation,
 ) -> None:
-    """매월 1일 환율 변동 리포트."""
+    """매월 1일 환율 변동 + 다음 달 예상 리포트."""
     rates = [r for _, r in fx_history_30d]
     if not rates:
         return
@@ -119,9 +132,21 @@ def post_monthly_report(
     low = min(rates)
     volatility = (high - low) / avg * 100
 
+    # 다음 달 예상 인당 — tier별
+    estimate_lines = []
+    if next_month_calc.standard.seat_count > 0:
+        estimate_lines.append(
+            f"Standard: `{next_month_calc.standard.per_person_krw:,}원`"
+        )
+    if next_month_calc.premium.seat_count > 0:
+        estimate_lines.append(
+            f"Premium: `{next_month_calc.premium.per_person_krw:,}원`"
+        )
+    next_month_estimate = " / ".join(estimate_lines) if estimate_lines else "-"
+
     embed = {
         "title": "📈 월간 환율 리포트",
-        "description": f"이번 달 USD/KRW 변동 요약",
+        "description": "이번 달 USD/KRW 변동 요약",
         "color": COLOR_INFO,
         "fields": [
             {"name": "현재", "value": f"`{fx_rate:,.2f}`", "inline": True},
@@ -131,22 +156,22 @@ def post_monthly_report(
             {"name": "최저", "value": f"`{low:,.2f}`", "inline": True},
             {
                 "name": "다음 달 예상 인당",
-                "value": f"`{next_month_estimate:,}원`",
+                "value": next_month_estimate,
                 "inline": True,
             },
         ],
-        "footer": {"text": "안전 마진 5% 적용 기준"},
+        "footer": {"text": "안전 마진 5% + VAT 10% 적용 기준"},
     }
 
     _post_message(bot_token, channel_id, {"embeds": [embed]})
 
 
-def _render_deposit_status(deposits: DepositSnapshot, members_count: int) -> str:
+def _render_deposit_status(deposits: DepositSnapshot, total_seats: int) -> str:
     paid_count = deposits.paid_count
     if paid_count == 0:
-        return f"⬜ 0 / {members_count} (아직 입금 체크 없음)"
+        return f"⬜ 0 / {total_seats} (아직 입금 체크 없음)"
 
-    lines = [f"✅ {paid_count} / {members_count}"]
+    lines = [f"✅ {paid_count} / {total_seats}"]
     for name in deposits.paid_users:
         lines.append(f"  • {name}")
     return "\n".join(lines)

@@ -90,9 +90,12 @@ def run_billing_alert(cfg: Config, today: date, days_until: int) -> int:
     carryover = previous_carryover(history)
 
     calc = calculate_billing(
-        total_usd=cfg.total_usd,
         fx_rate=fx_rate,
-        members_count=cfg.members_count,
+        standard_seats=cfg.standard_seats,
+        premium_seats=cfg.premium_seats,
+        standard_price_usd=cfg.standard_price_usd,
+        premium_price_usd=cfg.premium_price_usd,
+        vat_rate=cfg.vat_rate,
         safety_margin=cfg.safety_margin,
         carryover_krw=carryover,
     )
@@ -121,13 +124,15 @@ def run_monthly_report(cfg: Config, today: date) -> int:
     fx_rate = fetch_usd_krw_rate(cfg.koreaexim_api_key)
 
     # TODO: 환율 이력 30일치 — 현재는 단순 구현
-    # 실 운영에서는 매일 환율을 data/fx_history.json에 누적해 두는 것이 정확
     fx_history_30d: list[tuple[str, float]] = [(today.isoformat(), fx_rate)]
 
     estimate = calculate_billing(
-        total_usd=cfg.total_usd,
         fx_rate=fx_rate,
-        members_count=cfg.members_count,
+        standard_seats=cfg.standard_seats,
+        premium_seats=cfg.premium_seats,
+        standard_price_usd=cfg.standard_price_usd,
+        premium_price_usd=cfg.premium_price_usd,
+        vat_rate=cfg.vat_rate,
         safety_margin=cfg.safety_margin,
         carryover_krw=0,
     )
@@ -137,7 +142,7 @@ def run_monthly_report(cfg: Config, today: date) -> int:
         channel_id=cfg.channel_id,
         fx_rate=fx_rate,
         fx_history_30d=fx_history_30d,
-        next_month_estimate=estimate.per_person_krw,
+        next_month_calc=estimate,
     )
     return 0
 
@@ -149,21 +154,39 @@ def run_dry_run(cfg: Config, today: date) -> int:
     carryover = previous_carryover(history)
 
     calc = calculate_billing(
-        total_usd=cfg.total_usd,
         fx_rate=fx_rate,
-        members_count=cfg.members_count,
+        standard_seats=cfg.standard_seats,
+        premium_seats=cfg.premium_seats,
+        standard_price_usd=cfg.standard_price_usd,
+        premium_price_usd=cfg.premium_price_usd,
+        vat_rate=cfg.vat_rate,
         safety_margin=cfg.safety_margin,
         carryover_krw=carryover,
     )
 
     print("=" * 50)
     print(f"오늘: {today}")
-    print(f"USD: ${cfg.total_usd:.2f} (=${cfg.usd_per_seat} × {cfg.members_count}명 × VAT {cfg.vat_rate*100:.0f}%)")
+    print(
+        f"시트: Standard {cfg.standard_seats}명 (${cfg.standard_price_usd}/시트) + "
+        f"Premium {cfg.premium_seats}명 (${cfg.premium_price_usd}/시트)"
+    )
     print(f"환율: {fx_rate:,.2f} KRW/USD")
-    print(f"마진: {cfg.safety_margin*100:.0f}%")
+    print(f"마진: {cfg.safety_margin*100:.0f}%, VAT: {cfg.vat_rate*100:.0f}%")
     print(f"이월: {carryover:,}원")
+    print(f"총 청구 USD (VAT 포함): ${calc.total_usd:.2f}")
     print(f"필요 KRW: {calc.total_krw_needed:,}원")
-    print(f"인당 입금: {calc.per_person_krw:,}원")
+    print()
+    if calc.standard.seat_count > 0:
+        print(
+            f"Standard 인당 입금: {calc.standard.per_person_krw:,}원 "
+            f"× {calc.standard.seat_count}명"
+        )
+    if calc.premium.seat_count > 0:
+        print(
+            f"Premium 인당 입금: {calc.premium.per_person_krw:,}원 "
+            f"× {calc.premium.seat_count}명"
+        )
+    print(f"총 모금액: {calc.total_collected_krw:,}원")
     print(f"예상 잉여: {calc.expected_surplus_krw:,}원")
     print(f"D-{days_until_billing(today, cfg.billing_day)} until billing")
     print("=" * 50)

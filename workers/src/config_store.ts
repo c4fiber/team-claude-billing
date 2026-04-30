@@ -5,12 +5,10 @@
  * 값 형식: 문자열
  *
  * 현재 사용:
- *   config:members_count = "5"  (또는 운영 중 변경된 값)
- *
- * 이 저장소는 KV namespace를 인프라가 아닌 도메인 데이터로 활용합니다.
- * 환경변수와의 핵심 차이:
- *   - 환경변수: 배포 시점 결정, 변경 시 재배포 필요
- *   - KV config: 런타임 결정, 변경 시 즉시 반영
+ *   config:standard_seats     — Standard 시트 수 (예: "3")
+ *   config:premium_seats      — Premium 시트 수 (예: "2")
+ *   config:standard_price_usd — Standard 시트 월 USD (예: "25")
+ *   config:premium_price_usd  — Premium 시트 월 USD (예: "125")
  *
  * Notifier (Python)도 같은 KV에서 같은 키를 읽습니다 → SSoT.
  */
@@ -46,12 +44,17 @@ export class ConfigStore {
   }
 
   /**
-   * 모임 인원수. 친구 모임의 도메인 핵심 값.
-   * 변경은 다음 명령으로:
-   *   npx wrangler kv key put --namespace-id=<KV_ID> "config:members_count" "6"
+   * 전체 시트 수 (Standard + Premium).
+   * 메시지 갱신 시 "X / N" 표시에 사용.
+   *
+   * 변경: docs/OPERATIONS.md 참고
+   *   npx wrangler kv key put --namespace-id=<KV_ID> "config:standard_seats" "3" --remote
+   *   npx wrangler kv key put --namespace-id=<KV_ID> "config:premium_seats" "2" --remote
    */
-  async getMembersCount(): Promise<number> {
-    return this.getInt('members_count', 5); // fallback 5
+  async getTotalSeats(): Promise<number> {
+    const standard = await this.getInt('standard_seats', 5);
+    const premium = await this.getInt('premium_seats', 0);
+    return standard + premium;
   }
 
   private fullKey(key: string): string {

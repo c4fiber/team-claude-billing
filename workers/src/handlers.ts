@@ -25,7 +25,7 @@ export interface Env {
   DISCORD_APP_ID: string;
   DEPOSITS_KV: KVNamespace;
   TIMEZONE?: string;
-  // MEMBERS_COUNT는 더 이상 환경변수가 아닙니다 (KV의 config:members_count 사용)
+  // 시트 구성/가격은 KV의 config:* 키에서 읽음 (Workers와 Notifier 간 SSoT)
 }
 
 const DEPOSIT_STATUS_FIELD_NAME = '현재 입금 현황';
@@ -100,7 +100,7 @@ async function handlePaidToggle(
     ? await store.markPaid(monthKey, userId, username)
     : await store.unmarkPaid(monthKey, userId);
 
-  const membersCount = await configStore.getMembersCount();
+  const membersCount = await configStore.getTotalSeats();
 
   // 원본 메시지에 embed가 없거나 message 자체가 없으면 fallback (ephemeral 응답)
   const originalEmbed = interaction.message?.embeds?.[0];
@@ -193,6 +193,7 @@ async function handleHelp(): Promise<Response> {
   const content = [
     '📖 **사용 가능한 명령어**',
     '',
+    '`/status` — 이번 달 입금 현황 조회',
     '`/rate` — 환율 안내',
     '`/help` — 이 도움말',
     '',
