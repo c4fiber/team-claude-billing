@@ -17,11 +17,14 @@ import sys
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import json
+
 from .calculator import calculate_billing
 from .config import Config
-from .discord_client import post_billing_alert, post_monthly_report
-from .fx_client import fetch_usd_krw_rate
+from .discord_client import post_billing_alert, post_monthly_report, post_rate_graph
+from .fx_client import fetch_usd_krw_rate, fetch_usd_krw_history_30d
 from .kv_reader import fetch_current_deposits
+from .kv_writer import put_kv_value
 from .surplus_store import load_history, previous_carryover
 
 KST = ZoneInfo("Asia/Seoul")
@@ -37,7 +40,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
-        choices=["auto", "billing-alert", "monthly-report", "dry-run"],
+        choices=["auto", "billing-alert", "monthly-report", "rate-graph", "dry-run"],
         default="auto",
         help="auto: 날짜에 따라 자동 결정, dry-run: 실제 발송 없이 계산만 출력",
     )
@@ -59,6 +62,8 @@ def main() -> int:
         return run_billing_alert(cfg, today, days)
     if args.mode == "monthly-report":
         return run_monthly_report(cfg, today)
+    if args.mode == "rate-graph":
+        return run_rate_graph(cfg, today)
     if args.mode == "dry-run":
         return run_dry_run(cfg, today)
     return 1
@@ -123,8 +128,11 @@ def run_billing_alert(cfg: Config, today: date, days_until: int) -> int:
 def run_monthly_report(cfg: Config, today: date) -> int:
     fx_rate = fetch_usd_krw_rate(cfg.koreaexim_api_key)
 
-    # TODO: 환율 이력 30일치 — 현재는 단순 구현
-    fx_history_30d: list[tuple[str, float]] = [(today.isoformat(), fx_rate)]
+    fx_history_30d = fetch_usd_krw_history_30d(cfg.koreaexim_api_key)
+    if not fx_history_30d:
+        fx_history_30d = [(today.isoformat(), fx_rate)]
+
+    _save_rate_snapshot_to_kv(cfg, fx_rate, fx_history_30d, today)
 
     estimate = calculate_billing(
         fx_rate=fx_rate,
@@ -145,6 +153,62 @@ def run_monthly_report(cfg: Config, today: date) -> int:
         next_month_calc=estimate,
     )
     return 0
+
+
+def run_rate_graph(cfg: Config, today: date) -> int:
+    """최근 30 영업일 환율 그래프를 생성해 Discord에 발송."""
+    from .graph_generator import generate_fx_graph
+
+    fx_rate = fetch_usd_krw_rate(cfg.koreaexim_api_key)
+    history = fetch_usd_krw_history_30d(cfg.koreaexim_api_key)
+    if not history:
+        logger.error("환율 이력 데이터를 가져올 수 없습니다.")
+        return 1
+
+    rates = [r for _, r in history]
+    avg = sum(rates) / len(rates)
+    image_bytes = generate_fx_graph(history)
+
+    post_rate_graph(
+        bot_token=cfg.bot_token,
+        channel_id=cfg.channel_id,
+        image_bytes=image_bytes,
+        fx_rate=fx_rate,
+        avg=avg,
+        high=max(rates),
+        low=min(rates),
+        data_points=len(history),
+    )
+    _save_rate_snapshot_to_kv(cfg, fx_rate, history, today)
+    return 0
+
+
+def _save_rate_snapshot_to_kv(
+    cfg: Config,
+    fx_rate: float,
+    history: list[tuple[str, float]],
+    today: date,
+) -> None:
+    """최신 환율 스냅샷을 KV에 저장 (/rate 커맨드용)."""
+    rates = [r for _, r in history]
+    snapshot = {
+        "rate": round(fx_rate, 2),
+        "avg_30d": round(sum(rates) / len(rates), 2) if rates else round(fx_rate, 2),
+        "high_30d": round(max(rates), 2) if rates else round(fx_rate, 2),
+        "low_30d": round(min(rates), 2) if rates else round(fx_rate, 2),
+        "updated_at": today.isoformat(),
+        "data_points": len(rates),
+    }
+    try:
+        put_kv_value(
+            cfg.cf_account_id,
+            cfg.cf_kv_namespace_id,
+            cfg.cf_api_token,
+            "fx:latest_rate",
+            json.dumps(snapshot),
+        )
+    except Exception as e:
+        logger.warning("KV 스냅샷 저장 실패 (무시): %s", e)
 
 
 def run_dry_run(cfg: Config, today: date) -> int:

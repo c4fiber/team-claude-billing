@@ -15,6 +15,7 @@ on:
           - auto
           - billing-alert
           - monthly-report
+          - rate-graph
           - dry-run
       force_days:
         description: '강제 D-N 알림 (billing-alert 모드일 때만)'

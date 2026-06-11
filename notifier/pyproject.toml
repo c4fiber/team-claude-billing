@@ -5,6 +5,7 @@ description = "Claude Team 정기결제 알림 발송 (GitHub Actions에서 실�
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27.0",
+    "matplotlib>=3.9.0",
 ]
 
 [tool.uv]

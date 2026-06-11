@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 import httpx
@@ -175,6 +176,64 @@ def _render_deposit_status(deposits: DepositSnapshot, total_seats: int) -> str:
     for name in deposits.paid_users:
         lines.append(f"  • {name}")
     return "\n".join(lines)
+
+
+def post_rate_graph(
+    bot_token: str,
+    channel_id: str,
+    image_bytes: bytes,
+    fx_rate: float,
+    avg: float,
+    high: float,
+    low: float,
+    data_points: int,
+) -> None:
+    """환율 그래프 PNG를 Discord 채널에 파일로 업로드."""
+    volatility = (high - low) / avg * 100
+
+    embed = {
+        "title": "📊 USD/KRW 환율 추이 (최근 30 영업일)",
+        "color": COLOR_INFO,
+        "image": {"url": "attachment://fx_rate_graph.png"},
+        "fields": [
+            {"name": "현재", "value": f"`{fx_rate:,.2f}`", "inline": True},
+            {"name": "30일 평균", "value": f"`{avg:,.2f}`", "inline": True},
+            {"name": "변동폭", "value": f"`{volatility:.2f}%`", "inline": True},
+            {"name": "최고", "value": f"`{high:,.2f}`", "inline": True},
+            {"name": "최저", "value": f"`{low:,.2f}`", "inline": True},
+            {"name": "데이터", "value": f"`{data_points}영업일`", "inline": True},
+        ],
+        "footer": {"text": "한국수출입은행 매매기준율 기준"},
+    }
+    _post_message_with_file(
+        bot_token,
+        channel_id,
+        payload={"embeds": [embed]},
+        file_bytes=image_bytes,
+        filename="fx_rate_graph.png",
+        content_type="image/png",
+    )
+
+
+def _post_message_with_file(
+    bot_token: str,
+    channel_id: str,
+    payload: dict,
+    file_bytes: bytes,
+    filename: str,
+    content_type: str,
+) -> None:
+    """multipart/form-data로 파일과 embed를 함께 발송."""
+    url = f"{DISCORD_API}/channels/{channel_id}/messages"
+    # Content-Type은 httpx가 boundary 포함해 자동 설정 — 헤더에 수동 지정 금지
+    headers = {"Authorization": f"Bot {bot_token}"}
+    files = {"files[0]": (filename, file_bytes, content_type)}
+    data = {"payload_json": json.dumps(payload)}
+    resp = httpx.post(url, headers=headers, files=files, data=data, timeout=30.0)
+    if resp.status_code >= 400:
+        logger.error("Discord 파일 업로드 실패 (%d): %s", resp.status_code, resp.text)
+        resp.raise_for_status()
+    logger.info("Discord 파일 업로드 완료")
 
 
 def _post_message(bot_token: str, channel_id: str, payload: dict) -> None:
