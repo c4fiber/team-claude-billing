@@ -85,6 +85,10 @@ def run_auto(cfg: Config, today: date) -> int:
         logger.info("D-3 — 결제 알림 발송")
         return run_billing_alert(cfg, today, 3)
 
+    if days_until == 0:
+        logger.info("결제 당일 (D-0) — 환율 그래프 발송")
+        return run_rate_graph(cfg, today)
+
     logger.info("오늘은 알림 발송 대상이 아닙니다 (D-%d).", days_until)
     return 0
 
