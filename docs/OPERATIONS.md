@@ -98,17 +98,41 @@ npx wrangler kv key put --namespace-id="$KV_ID" "config:premium_price_usd" "130"
 
 ---
 
+## GitHub Actions 워크플로우
+
+3개 파일로 역할이 분리되어 있습니다.
+
+| 워크플로우 | 파일 | 트리거 | 역할 |
+|-----------|------|--------|------|
+| **Schedule (Auto)** | `schedule.yml` | 매일 09:00 KST (cron) | 날짜 기반 자동 실행 |
+| **Rate Graph** | `rate-graph.yml` | 매일 09:15 KST (cron) + 수동 | 그래프 생성 + KV 캐시 |
+| **Manual Override** | `manual.yml` | 수동 전용 | 관리자 강제 실행 |
+
+**Schedule (Auto) 동작 기준:**
+
+| 날짜 | 동작 |
+|------|------|
+| 매월 1일 | 월간 환율 리포트 |
+| D-7 (결제 7일 전) | 결제 알림 |
+| D-3 (결제 3일 전) | 결제 알림 |
+| D-0 (결제 당일) | 환율 그래프 발송 |
+| 그 외 | 아무 동작 없음 |
+
+---
+
 ## 환율 그래프 발송
 
 ### 수동으로 30일 그래프 발송
 
-GitHub Actions → **Billing Notifier** → **Run workflow** → mode: `rate-graph`
+GitHub Actions → **Rate Graph** → **Run workflow** (수동 트리거)
 
 실행하면:
 1. 한국수출입은행 API에서 최근 30 영업일치 USD/KRW 환율 조회
 2. PNG 차트 생성 (Discord dark 테마, High/Low/Now 마커)
 3. Discord 채널에 이미지 + 통계 embed 발송
-4. KV의 `fx:latest_rate` 키 갱신 → `/rate` 커맨드가 이 값을 읽음
+4. KV 갱신:
+   - `fx:rate_graph` — PNG base64 (Workers `/rate` 커맨드가 이 이미지를 즉시 반환)
+   - `fx:latest_rate` — 텍스트 스냅샷 JSON
 
 ### `fx:latest_rate` KV 키
 
@@ -252,9 +276,9 @@ npx wrangler tail
 
 ### `/rate` 커맨드가 "아직 환율 데이터가 없습니다" 표시
 
-KV에 `fx:latest_rate` 키가 없는 상태입니다. 처음 셋업 후 또는 KV를 초기화한 경우 발생.
+KV에 `fx:rate_graph` 또는 `fx:latest_rate` 키가 없는 상태입니다. 처음 셋업 후 또는 KV를 초기화한 경우 발생.
 
-**해결**: GitHub Actions → Billing Notifier → Run workflow → mode: `rate-graph` 실행.
+**해결**: GitHub Actions → **Rate Graph** → **Run workflow** 실행.
 
 ### 환율 그래프 발송 실패 (rate-graph 모드)
 
@@ -301,9 +325,11 @@ KV에 `fx:latest_rate` 키가 없는 상태입니다. 처음 셋업 후 또는 K
 |------|------|
 | 시트 구성/가격 (도메인 핵심) | KV의 `config:*` (production, `--remote`로 접근) |
 | 입금 상태 | KV의 `deposits:YYYY-MM` (production, `--remote`로 접근) |
-| 환율 스냅샷 (`/rate` 커맨드용) | KV의 `fx:latest_rate` (Notifier가 자동 갱신) |
+| 환율 그래프 PNG (`/rate` 이미지) | KV의 `fx:rate_graph` (Rate Graph 워크플로우가 자동 갱신) |
+| 환율 텍스트 스냅샷 (`/rate` fallback) | KV의 `fx:latest_rate` (Rate Graph 워크플로우가 자동 갱신) |
 | 잉여금 이력 | git의 `data/surplus.json` |
 | 운영 파라미터 (VAT, 마진 등) | GitHub Variables |
 | 비밀값 | GitHub Secrets + Cloudflare Secrets |
+| 워크플로우 | `.github/workflows/` — schedule / rate-graph / manual |
 | Workers 코드 | `workers/src/` |
 | Notifier 코드 | `notifier/src/` |

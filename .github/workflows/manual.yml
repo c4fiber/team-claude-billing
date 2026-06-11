@@ -1,0 +1,78 @@
+name: Manual Override
+
+# 관리자용 수동 실행 워크플로우.
+# 스케줄이 아닌 특정 시점에 강제 실행하거나 계산 결과를 확인할 때 사용합니다.
+#
+# 모드 설명:
+#   billing-alert  — 결제 알림 강제 발송. force_days로 D-N 지정 (기본 D-7)
+#   monthly-report — 월간 환율 리포트 강제 발송
+#   dry-run        — 발송 없이 계산 결과만 로그 출력 (설정 검증용)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '실행 모드'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options:
+          - billing-alert
+          - monthly-report
+          - dry-run
+      force_days:
+        description: '강제 D-N 알림 (billing-alert 모드일 때만, 예: 7 또는 3)'
+        required: false
+        type: string
+
+jobs:
+  manual:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # monthly-report 실행 시 surplus.json 커밋 가능
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        working-directory: notifier
+        run: uv sync
+
+      - name: Run notifier
+        working-directory: notifier
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          KOREAEXIM_API_KEY: ${{ secrets.KOREAEXIM_API_KEY }}
+          VAT_RATE: ${{ vars.VAT_RATE || '0.10' }}
+          SAFETY_MARGIN: ${{ vars.SAFETY_MARGIN || '0.05' }}
+          BILLING_DAY: ${{ vars.BILLING_DAY || '15' }}
+        run: |
+          MODE="${{ github.event.inputs.mode }}"
+          FORCE_DAYS="${{ github.event.inputs.force_days }}"
+          if [ -n "$FORCE_DAYS" ]; then
+            uv run python -m src.main --mode "$MODE" --force-days "$FORCE_DAYS"
+          else
+            uv run python -m src.main --mode "$MODE"
+          fi
+
+      - name: Commit surplus history (if changed)
+        run: |
+          if [[ -n "$(git status --porcelain data/)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add data/
+            git commit -m "chore(notifier): update surplus history [skip ci]"
+            git push
+          fi

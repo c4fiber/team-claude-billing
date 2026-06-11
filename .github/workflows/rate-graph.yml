@@ -1,0 +1,51 @@
+name: Rate Graph
+
+# 매일 09:15 KST(00:15 UTC) 실행 — 30일 환율 그래프 생성 및 KV 캐시 저장.
+# Discord /rate 커맨드는 이 워크플로우가 저장한 KV 이미지를 읽어 즉시 반환합니다.
+#
+# 이 워크플로우가 하는 일:
+#   1. Korea Exim Bank API로 최근 30 영업일치 USD/KRW 환율 조회
+#   2. matplotlib로 PNG 그래프 생성
+#   3. Discord 채널에 이미지 발송
+#   4. KV에 저장 (fx:rate_graph — PNG base64, fx:latest_rate — 텍스트 스냅샷)
+#      → Workers /rate 커맨드가 KV에서 읽어 즉시 반환
+#
+# 수동 실행: Actions 탭 → Rate Graph → Run workflow
+
+on:
+  schedule:
+    - cron: '15 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  rate-graph:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        working-directory: notifier
+        run: uv sync
+
+      - name: Generate and cache rate graph
+        working-directory: notifier
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          KOREAEXIM_API_KEY: ${{ secrets.KOREAEXIM_API_KEY }}
+          VAT_RATE: ${{ vars.VAT_RATE || '0.10' }}
+          SAFETY_MARGIN: ${{ vars.SAFETY_MARGIN || '0.05' }}
+          BILLING_DAY: ${{ vars.BILLING_DAY || '15' }}
+        run: uv run python -m src.main --mode rate-graph
