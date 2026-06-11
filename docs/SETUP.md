@@ -190,6 +190,18 @@ https://www.koreaexim.go.kr/ir/HPHKIR020M01?apino=2&viewtype=C
 3. **Run workflow** → mode를 `dry-run`으로 선택 → 실행
 4. 로그에서 계산 결과 확인
 
+### 3-6. 30일 환율 그래프 첫 발송 (권장)
+
+셋업 후 처음에 한 번 실행해 두면 `/rate` 커맨드가 실제 환율 데이터를 표시합니다.
+
+1. **Actions** 탭 → **Billing Notifier** → **Run workflow**
+2. mode: `rate-graph` 선택 → 실행
+3. Discord 채널에 PNG 그래프가 발송되고, KV에 환율 스냅샷이 저장됨
+4. 이후 `/rate` 커맨드 → 현재 환율, 30일 평균, 최고/최저, 변동폭 표시
+
+> 이후 매월 1일 `monthly-report` 실행 시 자동으로 KV가 갱신됩니다.
+> 수시로 확인하고 싶을 때는 `rate-graph` 모드를 수동으로 실행하세요.
+
 ---
 
 ## 4. 실 운영 시작
