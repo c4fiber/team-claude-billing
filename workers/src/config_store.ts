@@ -15,6 +15,15 @@
 
 const CONFIG_PREFIX = 'config:';
 
+export interface FxRateSnapshot {
+  rate: number;
+  avg_30d: number;
+  high_30d: number;
+  low_30d: number;
+  updated_at: string;
+  data_points: number;
+}
+
 export class ConfigStore {
   // 인터랙션 1회 내 캐싱 — 같은 인터랙션에서 여러 번 호출되어도 KV는 1번만
   private cache = new Map<string, string | null>();
@@ -55,6 +64,20 @@ export class ConfigStore {
     const standard = await this.getInt('standard_seats', 5);
     const premium = await this.getInt('premium_seats', 0);
     return standard + premium;
+  }
+
+  /**
+   * 최신 환율 스냅샷을 가져옵니다. Python notifier의 rate-graph/monthly-report 실행 후 갱신.
+   * 데이터가 없거나 파싱 실패 시 null 반환.
+   */
+  async getFxLatestRate(): Promise<FxRateSnapshot | null> {
+    const raw = await this.kv.get('fx:latest_rate');
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as FxRateSnapshot;
+    } catch {
+      return null;
+    }
   }
 
   private fullKey(key: string): string {

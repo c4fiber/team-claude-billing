@@ -49,6 +49,27 @@ def fetch_usd_krw_rate(api_key: str) -> float:
     )
 
 
+def fetch_usd_krw_history_30d(api_key: str) -> list[tuple[str, float]]:
+    """최근 30 영업일치 USD/KRW 매매기준율 이력. 날짜 오름차순.
+
+    주말/공휴일은 API가 데이터를 제공하지 않으므로 자동 스킵.
+    30 영업일 확보를 위해 최대 45 캘린더일 전까지 조회.
+    """
+    today = datetime.now(KST).date()
+    results: list[tuple[str, float]] = []
+
+    for offset in range(1, 46):
+        if len(results) >= 30:
+            break
+        target = today - timedelta(days=offset)
+        rate = _try_fetch(api_key, target)
+        if rate is not None:
+            results.append((target.isoformat(), rate))
+
+    results.reverse()
+    return results
+
+
 def _try_fetch(api_key: str, date) -> float | None:
     params = {
         "authkey": api_key,

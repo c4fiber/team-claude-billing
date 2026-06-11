@@ -17,7 +17,7 @@ import {
   MessageFlags,
 } from './types';
 import { DepositStore, getCurrentMonthKey, DepositMap } from './store';
-import { ConfigStore } from './config_store';
+import { ConfigStore, FxRateSnapshot } from './config_store';
 
 export interface Env {
   DISCORD_PUBLIC_KEY: string;
@@ -53,7 +53,7 @@ export async function handleInteraction(
       return await handleStatus(store);
     }
     if (cmdName === 'rate') {
-      return await handleRate();
+      return await handleRate(configStore);
     }
     if (cmdName === 'help') {
       return await handleHelp();
@@ -178,14 +178,39 @@ async function handleStatus(store: DepositStore): Promise<Response> {
   });
 }
 
-async function handleRate(): Promise<Response> {
+async function handleRate(configStore: ConfigStore): Promise<Response> {
+  const snapshot = await configStore.getFxLatestRate();
+
+  if (!snapshot) {
+    return jsonResponse({
+      type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        content: [
+          '💹 **USD/KRW 환율 정보**',
+          '',
+          '아직 환율 데이터가 없습니다.',
+          'GitHub Actions에서 **rate-graph** 모드를 실행하면 그래프와 함께 최신 데이터가 갱신됩니다.',
+        ].join('\n'),
+        flags: MessageFlags.EPHEMERAL,
+      },
+    });
+  }
+
+  const volatility = (((snapshot.high_30d - snapshot.low_30d) / snapshot.avg_30d) * 100).toFixed(2);
+
+  const content = [
+    '💹 **USD/KRW 환율 정보**',
+    '',
+    `현재: \`${snapshot.rate.toFixed(2)}\``,
+    `30일 평균: \`${snapshot.avg_30d.toFixed(2)}\``,
+    `최고: \`${snapshot.high_30d.toFixed(2)}\`  최저: \`${snapshot.low_30d.toFixed(2)}\``,
+    `변동폭: \`${volatility}%\`  (${snapshot.data_points}영업일 기준)`,
+    `갱신일: ${snapshot.updated_at}`,
+  ].join('\n');
+
   return jsonResponse({
     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-    data: {
-      content:
-        '💡 환율 정보는 매월 1일 자동 발송됩니다.\nD-7, D-3 알림에 그 시점의 적용 환율이 포함됩니다.',
-      flags: MessageFlags.EPHEMERAL,
-    },
+    data: { content, flags: MessageFlags.EPHEMERAL },
   });
 }
 
