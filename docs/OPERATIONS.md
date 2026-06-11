@@ -98,6 +98,46 @@ npx wrangler kv key put --namespace-id="$KV_ID" "config:premium_price_usd" "130"
 
 ---
 
+## 환율 그래프 발송
+
+### 수동으로 30일 그래프 발송
+
+GitHub Actions → **Billing Notifier** → **Run workflow** → mode: `rate-graph`
+
+실행하면:
+1. 한국수출입은행 API에서 최근 30 영업일치 USD/KRW 환율 조회
+2. PNG 차트 생성 (Discord dark 테마, High/Low/Now 마커)
+3. Discord 채널에 이미지 + 통계 embed 발송
+4. KV의 `fx:latest_rate` 키 갱신 → `/rate` 커맨드가 이 값을 읽음
+
+### `fx:latest_rate` KV 키
+
+Notifier가 자동으로 관리하는 런타임 데이터. Workers의 `/rate` 커맨드가 읽습니다.
+
+```bash
+cd workers
+KV_ID=$(grep '^id =' wrangler.toml | cut -d'"' -f2)
+
+# 현재 저장된 환율 스냅샷 확인
+npx wrangler kv key get --namespace-id="$KV_ID" "fx:latest_rate" --remote --text | jq .
+```
+
+출력 형식:
+```json
+{
+  "rate": 1382.50,
+  "avg_30d": 1371.20,
+  "high_30d": 1395.00,
+  "low_30d": 1340.00,
+  "updated_at": "2026-06-11",
+  "data_points": 30
+}
+```
+
+> 이 키는 수동으로 편집할 필요 없습니다. `rate-graph` 또는 `monthly-report` 실행 시 자동 갱신됩니다.
+
+---
+
 ## 입금 데이터 운영
 
 ### 특정 월 입금 현황 조회
@@ -210,6 +250,22 @@ npx wrangler tail
 - KV에 `config:standard_seats` 또는 `config:premium_seats`가 production이 아닌 로컬에만 등록됨 (`--remote` 누락)
 - 키 이름 오타 (예: `config:standard_seats`가 아니라 `config:standard_seat`)
 
+### `/rate` 커맨드가 "아직 환율 데이터가 없습니다" 표시
+
+KV에 `fx:latest_rate` 키가 없는 상태입니다. 처음 셋업 후 또는 KV를 초기화한 경우 발생.
+
+**해결**: GitHub Actions → Billing Notifier → Run workflow → mode: `rate-graph` 실행.
+
+### 환율 그래프 발송 실패 (rate-graph 모드)
+
+```bash
+# 1. Actions 로그에서 오류 확인
+# 2. 한국수출입은행 API 응답 확인 — 평일 11시 이전이면 데이터 없을 수 있음
+# 3. KOREAEXIM_API_KEY 유효성 확인
+```
+
+> 주말/공휴일에 실행하면 최근 영업일 데이터로 자동 폴백합니다.
+
 ### 한국수출입은행 API 인증 실패
 
 ```bash
@@ -245,6 +301,7 @@ npx wrangler tail
 |------|------|
 | 시트 구성/가격 (도메인 핵심) | KV의 `config:*` (production, `--remote`로 접근) |
 | 입금 상태 | KV의 `deposits:YYYY-MM` (production, `--remote`로 접근) |
+| 환율 스냅샷 (`/rate` 커맨드용) | KV의 `fx:latest_rate` (Notifier가 자동 갱신) |
 | 잉여금 이력 | git의 `data/surplus.json` |
 | 운영 파라미터 (VAT, 마진 등) | GitHub Variables |
 | 비밀값 | GitHub Secrets + Cloudflare Secrets |
