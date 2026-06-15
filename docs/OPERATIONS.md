@@ -235,7 +235,7 @@ npx wrangler kv key get --namespace-id="$KV_ID" "config:premium_seats" --remote 
 # - USD_PER_SEAT (KV의 config:*_price_usd로 이동됨)
 
 # 3. Notifier dry-run으로 검증
-# GH Actions → Billing Notifier → Run workflow → mode: dry-run
+# GH Actions → Manual Override → Run workflow → mode: dry-run
 ```
 
 ### Workers의 메시지 갱신이 안 됨 또는 X / N 카운트가 이상함
