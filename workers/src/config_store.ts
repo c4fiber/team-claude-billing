@@ -80,6 +80,24 @@ export class ConfigStore {
     }
   }
 
+  /**
+   * 사전 생성된 환율 그래프 PNG를 가져옵니다.
+   * Python notifier의 rate-graph 실행 시 base64로 저장됨.
+   * 데이터가 없으면 null 반환.
+   */
+  async getRateGraph(): Promise<Uint8Array | null> {
+    const b64 = await this.kv.get('fx:rate_graph');
+    if (!b64) return null;
+    try {
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    } catch {
+      return null;
+    }
+  }
+
   private fullKey(key: string): string {
     return `${CONFIG_PREFIX}${key}`;
   }

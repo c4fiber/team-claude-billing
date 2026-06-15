@@ -17,6 +17,7 @@ import sys
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import base64
 import json
 
 from .calculator import calculate_billing
@@ -84,6 +85,10 @@ def run_auto(cfg: Config, today: date) -> int:
     if days_until == 3:
         logger.info("D-3 — 결제 알림 발송")
         return run_billing_alert(cfg, today, 3)
+
+    if days_until == 0:
+        logger.info("결제 당일 (D-0) — 환율 그래프 발송")
+        return run_rate_graph(cfg, today)
 
     logger.info("오늘은 알림 발송 대상이 아닙니다 (D-%d).", days_until)
     return 0
@@ -180,7 +185,21 @@ def run_rate_graph(cfg: Config, today: date) -> int:
         data_points=len(history),
     )
     _save_rate_snapshot_to_kv(cfg, fx_rate, history, today)
+    _cache_rate_graph_to_kv(cfg, image_bytes)
     return 0
+
+
+def _cache_rate_graph_to_kv(cfg: Config, image_bytes: bytes) -> None:
+    """PNG를 base64로 인코딩해 KV에 저장. Workers /rate 커맨드가 이 값을 읽어 반환."""
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    try:
+        put_kv_value(
+            cfg.cf_account_id, cfg.cf_kv_namespace_id, cfg.cf_api_token,
+            "fx:rate_graph", encoded,
+        )
+        logger.info("환율 그래프 KV 캐시 저장 완료 (%d bytes → %d chars)", len(image_bytes), len(encoded))
+    except Exception as e:
+        logger.warning("그래프 KV 캐시 저장 실패 (무시): %s", e)
 
 
 def _save_rate_snapshot_to_kv(

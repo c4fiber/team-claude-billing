@@ -1,26 +1,15 @@
-name: Billing Notifier
+name: Schedule (Auto)
+
+# 매일 09:00 KST(00:00 UTC) 실행.
+# 날짜에 따라 적절한 알림을 자동으로 선택해 발송합니다:
+#   - 매월 1일        → 월간 환율 리포트
+#   - 결제일 D-7/D-3  → 결제 알림 (인당 입금액 + 버튼)
+#   - 결제 당일(D-0)  → 환율 그래프 발송 (KV 캐시 포함)
+#   - 그 외           → 아무 동작 없음
 
 on:
   schedule:
-    # 매일 09:00 KST = 00:00 UTC
     - cron: '0 0 * * *'
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: '실행 모드'
-        required: true
-        default: 'dry-run'
-        type: choice
-        options:
-          - auto
-          - billing-alert
-          - monthly-report
-          - rate-graph
-          - dry-run
-      force_days:
-        description: '강제 D-N 알림 (billing-alert 모드일 때만)'
-        required: false
-        type: string
 
 jobs:
   notify:
@@ -43,7 +32,7 @@ jobs:
         working-directory: notifier
         run: uv sync
 
-      - name: Run notifier
+      - name: Run notifier (auto)
         working-directory: notifier
         env:
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
@@ -52,18 +41,10 @@ jobs:
           CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           KOREAEXIM_API_KEY: ${{ secrets.KOREAEXIM_API_KEY }}
-          # 시트 구성/가격은 KV의 config:* 키에서 읽음 (Workers와 SSoT)
           VAT_RATE: ${{ vars.VAT_RATE || '0.10' }}
           SAFETY_MARGIN: ${{ vars.SAFETY_MARGIN || '0.05' }}
           BILLING_DAY: ${{ vars.BILLING_DAY || '15' }}
-        run: |
-          MODE="${{ github.event.inputs.mode || 'auto' }}"
-          FORCE_DAYS="${{ github.event.inputs.force_days }}"
-          if [ -n "$FORCE_DAYS" ]; then
-            uv run python -m src.main --mode "$MODE" --force-days "$FORCE_DAYS"
-          else
-            uv run python -m src.main --mode "$MODE"
-          fi
+        run: uv run python -m src.main --mode auto
 
       - name: Commit surplus history (if changed)
         run: |

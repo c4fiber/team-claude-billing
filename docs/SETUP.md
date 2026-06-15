@@ -183,12 +183,44 @@ https://www.koreaexim.go.kr/ir/HPHKIR020M01?apino=2&viewtype=C
 
 > **참고**: 시트 구성과 가격(Standard/Premium 시트 수, 시트별 USD)은 GitHub Variables가 아닌 **KV의 `config:*` 키**에서 읽습니다 (2-3 단계에서 등록). Workers와 Notifier가 같은 KV 값을 참조하는 SSoT 구조입니다. 시트 변경(예: Standard ↔ Premium) 운영은 [OPERATIONS.md](./OPERATIONS.md) 참고.
 
-### 3-5. 첫 dry-run 테스트
+### 3-5. GitHub Actions 워크플로우 구조
 
-1. GitHub repo의 **Actions** 탭
-2. **Billing Notifier** 워크플로우 선택
-3. **Run workflow** → mode를 `dry-run`으로 선택 → 실행
-4. 로그에서 계산 결과 확인
+3개 워크플로우 파일로 역할이 분리되어 있습니다:
+
+| 워크플로우 | 파일 | 트리거 | 역할 |
+|-----------|------|--------|------|
+| **Schedule (Auto)** | `schedule.yml` | 매일 09:00 KST (cron) | 날짜 기반 자동 실행 — 월간 리포트, 결제 알림, 환율 그래프 |
+| **Rate Graph** | `rate-graph.yml` | 매일 09:15 KST (cron) + 수동 | 30일 환율 그래프 생성, Discord 발송, KV 캐시 저장 |
+| **Manual Override** | `manual.yml` | 수동 전용 | 관리자 강제 실행 — billing-alert, monthly-report, dry-run |
+
+**Schedule (Auto) 자동 발송 일정:**
+
+| 날짜 | 동작 |
+|------|------|
+| 매월 1일 | 월간 환율 리포트 |
+| D-7 (결제 7일 전) | 결제 알림 |
+| D-3 (결제 3일 전) | 결제 알림 |
+| D-0 (결제 당일) | 환율 그래프 발송 |
+| 그 외 | 아무 동작 없음 |
+
+**Rate Graph 역할:**
+- 매일 09:15 KST에 최신 30일 환율 그래프를 생성해 Discord에 발송
+- KV의 `fx:rate_graph` (PNG base64)와 `fx:latest_rate` (텍스트 스냅샷)를 갱신
+- Discord `/rate` 커맨드는 이 KV 이미지를 읽어 즉시 반환 (API 호출 없음)
+
+### 3-6. 첫 실행 테스트
+
+**dry-run으로 설정 검증:**
+1. Actions 탭 → **Manual Override** → **Run workflow**
+2. mode: `dry-run` → 실행
+3. 로그에서 계산 결과 확인
+
+**rate-graph 첫 발송 (권장):**
+1. Actions 탭 → **Rate Graph** → **Run workflow**
+2. 실행 후 Discord 채널에 PNG 그래프 수신 확인
+3. 이후 `/rate` 커맨드 → 그래프 이미지 즉시 반환
+
+> 이후 매일 09:15 KST에 자동으로 갱신됩니다.
 
 ### 3-6. 30일 환율 그래프 첫 발송 (권장)
 

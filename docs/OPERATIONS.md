@@ -305,5 +305,6 @@ KV에 `fx:latest_rate` 키가 없는 상태입니다. 처음 셋업 후 또는 K
 | 잉여금 이력 | git의 `data/surplus.json` |
 | 운영 파라미터 (VAT, 마진 등) | GitHub Variables |
 | 비밀값 | GitHub Secrets + Cloudflare Secrets |
+| 워크플로우 | `.github/workflows/` — schedule / rate-graph / manual |
 | Workers 코드 | `workers/src/` |
 | Notifier 코드 | `notifier/src/` |

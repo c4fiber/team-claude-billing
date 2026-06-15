@@ -179,9 +179,13 @@ async function handleStatus(store: DepositStore): Promise<Response> {
 }
 
 async function handleRate(configStore: ConfigStore): Promise<Response> {
-  const snapshot = await configStore.getFxLatestRate();
+  const [snapshot, pngBytes] = await Promise.all([
+    configStore.getFxLatestRate(),
+    configStore.getRateGraph(),
+  ]);
 
-  if (!snapshot) {
+  // 데이터 없음
+  if (!pngBytes && !snapshot) {
     return jsonResponse({
       type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
       data: {
@@ -189,23 +193,63 @@ async function handleRate(configStore: ConfigStore): Promise<Response> {
           '💹 **USD/KRW 환율 정보**',
           '',
           '아직 환율 데이터가 없습니다.',
-          'GitHub Actions에서 **rate-graph** 모드를 실행하면 그래프와 함께 최신 데이터가 갱신됩니다.',
+          'GitHub Actions에서 **rate-graph** 워크플로우를 실행하면 갱신됩니다.',
         ].join('\n'),
         flags: MessageFlags.EPHEMERAL,
       },
     });
   }
 
-  const volatility = (((snapshot.high_30d - snapshot.low_30d) / snapshot.avg_30d) * 100).toFixed(2);
+  // PNG 그래프 + 통계 embed 응답
+  if (pngBytes) {
+    const volatility = snapshot
+      ? (((snapshot.high_30d - snapshot.low_30d) / snapshot.avg_30d) * 100).toFixed(2)
+      : null;
 
+    const fields = snapshot
+      ? [
+          { name: '현재', value: `\`${snapshot.rate.toFixed(2)}\``, inline: true },
+          { name: '30일 평균', value: `\`${snapshot.avg_30d.toFixed(2)}\``, inline: true },
+          { name: '변동폭', value: `\`${volatility}%\``, inline: true },
+          { name: '최고', value: `\`${snapshot.high_30d.toFixed(2)}\``, inline: true },
+          { name: '최저', value: `\`${snapshot.low_30d.toFixed(2)}\``, inline: true },
+          { name: '갱신일', value: snapshot.updated_at, inline: true },
+        ]
+      : [];
+
+    const payload = {
+      type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        flags: MessageFlags.EPHEMERAL,
+        embeds: [
+          {
+            title: '📊 USD/KRW 환율 추이 (최근 30 영업일)',
+            color: 0x378add,
+            image: { url: 'attachment://fx_rate_graph.png' },
+            fields,
+            footer: { text: '한국수출입은행 매매기준율 기준' },
+          },
+        ],
+        attachments: [{ id: 0, filename: 'fx_rate_graph.png' }],
+      },
+    };
+
+    const form = new FormData();
+    form.append('payload_json', JSON.stringify(payload));
+    form.append('files[0]', new Blob([pngBytes], { type: 'image/png' }), 'fx_rate_graph.png');
+    return new Response(form);
+  }
+
+  // fallback: PNG 없고 텍스트 스냅샷만 있을 때
+  const volatility = (((snapshot!.high_30d - snapshot!.low_30d) / snapshot!.avg_30d) * 100).toFixed(2);
   const content = [
     '💹 **USD/KRW 환율 정보**',
     '',
-    `현재: \`${snapshot.rate.toFixed(2)}\``,
-    `30일 평균: \`${snapshot.avg_30d.toFixed(2)}\``,
-    `최고: \`${snapshot.high_30d.toFixed(2)}\`  최저: \`${snapshot.low_30d.toFixed(2)}\``,
-    `변동폭: \`${volatility}%\`  (${snapshot.data_points}영업일 기준)`,
-    `갱신일: ${snapshot.updated_at}`,
+    `현재: \`${snapshot!.rate.toFixed(2)}\``,
+    `30일 평균: \`${snapshot!.avg_30d.toFixed(2)}\``,
+    `최고: \`${snapshot!.high_30d.toFixed(2)}\`  최저: \`${snapshot!.low_30d.toFixed(2)}\``,
+    `변동폭: \`${volatility}%\`  (${snapshot!.data_points}영업일 기준)`,
+    `갱신일: ${snapshot!.updated_at}`,
   ].join('\n');
 
   return jsonResponse({
