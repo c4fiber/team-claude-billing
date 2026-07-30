@@ -136,6 +136,8 @@ def run_monthly_report(cfg: Config, today: date) -> int:
     fx_history_30d = fetch_usd_krw_history_30d(cfg.koreaexim_api_key)
     if not fx_history_30d:
         fx_history_30d = [(today.isoformat(), fx_rate)]
+    elif fx_history_30d[-1][0] != today.isoformat():
+        fx_history_30d.append((today.isoformat(), fx_rate))
 
     _save_rate_snapshot_to_kv(cfg, fx_rate, fx_history_30d, today)
 
@@ -169,6 +171,11 @@ def run_rate_graph(cfg: Config, today: date) -> int:
     if not history:
         logger.error("환율 이력 데이터를 가져올 수 없습니다.")
         return 1
+
+    # API는 11시 이전 당일 데이터를 제공하지 않으므로 오늘 값이 이력에 없을 수 있음.
+    # fx_rate(현재)와 high/low/avg 계산이 일치하도록 오늘 데이터를 명시적으로 포함.
+    if history[-1][0] != today.isoformat():
+        history.append((today.isoformat(), fx_rate))
 
     rates = [r for _, r in history]
     avg = sum(rates) / len(rates)
