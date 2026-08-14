@@ -1,6 +1,6 @@
 name: Rate Graph
 
-# 매일 09:15 KST(00:15 UTC) 실행 — 30일 환율 그래프 생성 및 KV 캐시 저장.
+# 매월 1일, 15일 09:15 KST(00:15 UTC) 실행 — 30일 환율 그래프 생성 및 KV 캐시 저장.
 # Discord /rate 커맨드는 이 워크플로우가 저장한 KV 이미지를 읽어 즉시 반환합니다.
 #
 # 이 워크플로우가 하는 일:
@@ -14,7 +14,7 @@ name: Rate Graph
 
 on:
   schedule:
-    - cron: '15 0 * * *'
+    - cron: '15 0 1,15 * *'  # 매월 1일, 15일 09:15 KST (2주 1회)
   workflow_dispatch:
 
 jobs:

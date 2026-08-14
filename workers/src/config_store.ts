@@ -4,11 +4,13 @@
  * 키 형식: "config:KEY"
  * 값 형식: 문자열
  *
- * 현재 사용:
+ * KV 키 구조 (전체):
  *   config:standard_seats     — Standard 시트 수 (예: "3")
  *   config:premium_seats      — Premium 시트 수 (예: "2")
  *   config:standard_price_usd — Standard 시트 월 USD (예: "25")
  *   config:premium_price_usd  — Premium 시트 월 USD (예: "125")
+ *   fx:latest_rate            — 환율 텍스트 스냅샷 JSON (Notifier 갱신)
+ *   fx:rate_graph             — 30일 환율 그래프 PNG base64 (Notifier 갱신)
  *
  * Notifier (Python)도 같은 KV에서 같은 키를 읽습니다 → SSoT.
  */

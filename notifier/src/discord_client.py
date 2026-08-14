@@ -181,36 +181,45 @@ def _render_deposit_status(deposits: DepositSnapshot, total_seats: int) -> str:
 def post_rate_graph(
     bot_token: str,
     channel_id: str,
-    image_bytes: bytes,
+    image_1m: bytes,
+    image_3m: bytes,
     fx_rate: float,
-    avg: float,
-    high: float,
-    low: float,
-    data_points: int,
+    stats_1m: dict,
+    stats_3m: dict,
 ) -> None:
-    """환율 그래프 PNG를 Discord 채널에 파일로 업로드."""
-    volatility = (high - low) / avg * 100
+    """환율 그래프 PNG 2장(1개월·3개월)을 Discord 채널에 순서대로 업로드."""
 
-    embed = {
-        "title": "📊 USD/KRW 환율 추이 (최근 30 영업일)",
-        "color": COLOR_INFO,
-        "image": {"url": "attachment://fx_rate_graph.png"},
-        "fields": [
-            {"name": "현재", "value": f"`{fx_rate:,.2f}`", "inline": True},
-            {"name": "30일 평균", "value": f"`{avg:,.2f}`", "inline": True},
-            {"name": "변동폭", "value": f"`{volatility:.2f}%`", "inline": True},
-            {"name": "최고", "value": f"`{high:,.2f}`", "inline": True},
-            {"name": "최저", "value": f"`{low:,.2f}`", "inline": True},
-            {"name": "데이터", "value": f"`{data_points}영업일`", "inline": True},
-        ],
-        "footer": {"text": "한국수출입은행 매매기준율 기준"},
-    }
+    def _make_embed(title: str, filename: str, stats: dict) -> dict:
+        volatility = (stats["high"] - stats["low"]) / stats["avg"] * 100
+        return {
+            "title": title,
+            "color": COLOR_INFO,
+            "image": {"url": f"attachment://{filename}"},
+            "fields": [
+                {"name": "현재", "value": f"`{fx_rate:,.2f}`", "inline": True},
+                {"name": "평균", "value": f"`{stats['avg']:,.2f}`", "inline": True},
+                {"name": "변동폭", "value": f"`{volatility:.2f}%`", "inline": True},
+                {"name": "최고", "value": f"`{stats['high']:,.2f}`", "inline": True},
+                {"name": "최저", "value": f"`{stats['low']:,.2f}`", "inline": True},
+                {"name": "데이터", "value": f"`{stats['count']}영업일`", "inline": True},
+            ],
+            "footer": {"text": "한국수출입은행 매매기준율 기준"},
+        }
+
+    # 1개월 그래프
     _post_message_with_file(
-        bot_token,
-        channel_id,
-        payload={"embeds": [embed]},
-        file_bytes=image_bytes,
-        filename="fx_rate_graph.png",
+        bot_token, channel_id,
+        payload={"embeds": [_make_embed("📊 USD/KRW 환율 추이 (최근 1개월)", "fx_rate_1m.png", stats_1m)]},
+        file_bytes=image_1m,
+        filename="fx_rate_1m.png",
+        content_type="image/png",
+    )
+    # 3개월 그래프
+    _post_message_with_file(
+        bot_token, channel_id,
+        payload={"embeds": [_make_embed("📈 USD/KRW 환율 추이 (최근 3개월)", "fx_rate_3m.png", stats_3m)]},
+        file_bytes=image_3m,
+        filename="fx_rate_3m.png",
         content_type="image/png",
     )
 
@@ -233,7 +242,7 @@ def _post_message_with_file(
     if resp.status_code >= 400:
         logger.error("Discord 파일 업로드 실패 (%d): %s", resp.status_code, resp.text)
         resp.raise_for_status()
-    logger.info("Discord 파일 업로드 완료")
+    logger.info("Discord 파일 업로드 완료 (%s)", filename)
 
 
 def _post_message(bot_token: str, channel_id: str, payload: dict) -> None:
