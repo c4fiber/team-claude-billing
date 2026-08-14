@@ -75,8 +75,9 @@ def run_auto(cfg: Config, today: date) -> int:
     days_until = days_until_billing(today, cfg.billing_day)
 
     if today.day == 1:
-        logger.info("매월 1일 — 월간 리포트 발송")
-        return run_monthly_report(cfg, today)
+        logger.info("매월 1일 — 월간 리포트 + 환율 그래프 발송")
+        run_monthly_report(cfg, today)
+        return run_rate_graph(cfg, today)
 
     if days_until == 7:
         logger.info("D-7 — 결제 알림 발송")
