@@ -23,7 +23,7 @@ import json
 from .calculator import calculate_billing
 from .config import Config
 from .discord_client import post_billing_alert, post_monthly_report, post_rate_graph
-from .fx_client import fetch_usd_krw_rate, fetch_usd_krw_history_30d
+from .fx_client import fetch_usd_krw_rate, fetch_usd_krw_history, fetch_usd_krw_history_30d
 from .kv_reader import fetch_current_deposits
 from .kv_writer import put_kv_value
 from .surplus_store import load_history, previous_carryover
@@ -163,36 +163,45 @@ def run_monthly_report(cfg: Config, today: date) -> int:
 
 
 def run_rate_graph(cfg: Config, today: date) -> int:
-    """최근 30 영업일 환율 그래프를 생성해 Discord에 발송."""
+    """최근 1개월·3개월 환율 그래프 2장을 생성해 Discord에 발송."""
     from .graph_generator import generate_fx_graph
 
     fx_rate = fetch_usd_krw_rate(cfg.koreaexim_api_key)
-    history = fetch_usd_krw_history_30d(cfg.koreaexim_api_key)
+    # 3개월(약 90 영업일) 이력 조회
+    history = fetch_usd_krw_history(cfg.koreaexim_api_key, business_days=90)
     if not history:
         logger.error("환율 이력 데이터를 가져올 수 없습니다.")
         return 1
 
-    # API는 11시 이전 당일 데이터를 제공하지 않으므로 오늘 값이 이력에 없을 수 있음.
-    # fx_rate(현재)와 high/low/avg 계산이 일치하도록 오늘 데이터를 명시적으로 포함.
+    # API는 11시 이전 당일 데이터를 제공하지 않으므로 오늘 값을 명시적으로 포함
     if history[-1][0] != today.isoformat():
         history.append((today.isoformat(), fx_rate))
 
-    rates = [r for _, r in history]
-    avg = sum(rates) / len(rates)
-    image_bytes = generate_fx_graph(history)
+    history_3m = history
+    history_1m = history[-30:]  # 최근 30 영업일 = 1개월
+
+    def _stats(h: list[tuple[str, float]]) -> dict:
+        rates = [r for _, r in h]
+        return {"avg": sum(rates) / len(rates), "high": max(rates), "low": min(rates), "count": len(rates)}
+
+    stats_1m = _stats(history_1m)
+    stats_3m = _stats(history_3m)
+
+    image_1m = generate_fx_graph(history_1m)
+    image_3m = generate_fx_graph(history_3m)
 
     post_rate_graph(
         bot_token=cfg.bot_token,
         channel_id=cfg.channel_id,
-        image_bytes=image_bytes,
+        image_1m=image_1m,
+        image_3m=image_3m,
         fx_rate=fx_rate,
-        avg=avg,
-        high=max(rates),
-        low=min(rates),
-        data_points=len(history),
+        stats_1m=stats_1m,
+        stats_3m=stats_3m,
     )
-    _save_rate_snapshot_to_kv(cfg, fx_rate, history, today)
-    _cache_rate_graph_to_kv(cfg, image_bytes)
+    # KV 캐시: /rate 커맨드는 1M 그래프를 반환
+    _save_rate_snapshot_to_kv(cfg, fx_rate, history_1m, today)
+    _cache_rate_graph_to_kv(cfg, image_1m)
     return 0
 
 
