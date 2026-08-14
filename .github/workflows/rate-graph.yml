@@ -1,20 +1,18 @@
 name: Rate Graph
 
-# 매월 1일, 15일 09:15 KST(00:15 UTC) 실행 — 30일 환율 그래프 생성 및 KV 캐시 저장.
-# Discord /rate 커맨드는 이 워크플로우가 저장한 KV 이미지를 읽어 즉시 반환합니다.
+# 수동 실행 전용 — 환율 그래프 생성 및 KV 캐시 저장.
+# 자동 발송은 schedule.yml(auto 모드)이 담당합니다:
+#   - 매월 1일  → monthly-report + rate-graph (schedule.yml)
+#   - D-0       → rate-graph (schedule.yml)
 #
 # 이 워크플로우가 하는 일:
-#   1. Korea Exim Bank API로 최근 30 영업일치 USD/KRW 환율 조회
-#   2. matplotlib로 PNG 그래프 생성
+#   1. Korea Exim Bank API로 최근 1개월·3개월 USD/KRW 환율 조회
+#   2. matplotlib로 PNG 그래프 생성 (2장)
 #   3. Discord 채널에 이미지 발송
 #   4. KV에 저장 (fx:rate_graph — PNG base64, fx:latest_rate — 텍스트 스냅샷)
 #      → Workers /rate 커맨드가 KV에서 읽어 즉시 반환
-#
-# 수동 실행: Actions 탭 → Rate Graph → Run workflow
 
 on:
-  schedule:
-    - cron: '15 0 1,15 * *'  # 매월 1일, 15일 09:15 KST (2주 1회)
   workflow_dispatch:
 
 jobs:
