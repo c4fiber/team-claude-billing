@@ -224,6 +224,38 @@ def post_rate_graph(
     )
 
 
+def post_rate_graph_1m(
+    bot_token: str,
+    channel_id: str,
+    image_bytes: bytes,
+    fx_rate: float,
+    stats: dict,
+) -> None:
+    """결제 알림용 1개월 환율 그래프 발송 (단일 이미지)."""
+    volatility = (stats["high"] - stats["low"]) / stats["avg"] * 100
+    embed = {
+        "title": "📊 USD/KRW 환율 추이 (최근 1개월)",
+        "color": COLOR_INFO,
+        "image": {"url": "attachment://fx_rate_1m.png"},
+        "fields": [
+            {"name": "현재", "value": f"`{fx_rate:,.2f}`", "inline": True},
+            {"name": "30일 평균", "value": f"`{stats['avg']:,.2f}`", "inline": True},
+            {"name": "변동폭", "value": f"`{volatility:.2f}%`", "inline": True},
+            {"name": "최고", "value": f"`{stats['high']:,.2f}`", "inline": True},
+            {"name": "최저", "value": f"`{stats['low']:,.2f}`", "inline": True},
+            {"name": "데이터", "value": f"`{stats['count']}영업일`", "inline": True},
+        ],
+        "footer": {"text": "한국수출입은행 매매기준율 기준"},
+    }
+    _post_message_with_file(
+        bot_token, channel_id,
+        payload={"embeds": [embed]},
+        file_bytes=image_bytes,
+        filename="fx_rate_1m.png",
+        content_type="image/png",
+    )
+
+
 def _post_message_with_file(
     bot_token: str,
     channel_id: str,

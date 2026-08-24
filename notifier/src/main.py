@@ -22,7 +22,7 @@ import json
 
 from .calculator import calculate_billing
 from .config import Config
-from .discord_client import post_billing_alert, post_monthly_report, post_rate_graph
+from .discord_client import post_billing_alert, post_monthly_report, post_rate_graph, post_rate_graph_1m
 from .fx_client import fetch_usd_krw_rate, fetch_usd_krw_history, fetch_usd_krw_history_30d
 from .kv_reader import fetch_current_deposits
 from .kv_writer import put_kv_value
@@ -128,6 +128,26 @@ def run_billing_alert(cfg: Config, today: date, days_until: int) -> int:
         days_until_billing=days_until,
         billing_date_str=billing_date_str,
     )
+
+    # 결제 알림과 함께 최근 1개월 환율 그래프 발송
+    try:
+        from .graph_generator import generate_fx_graph
+        fx_history = fetch_usd_krw_history(cfg.koreaexim_api_key, business_days=30)
+        if fx_history:
+            if fx_history[-1][0] != today.isoformat():
+                fx_history.append((today.isoformat(), fx_rate))
+            rates = [r for _, r in fx_history]
+            stats = {"avg": sum(rates) / len(rates), "high": max(rates), "low": min(rates), "count": len(rates)}
+            post_rate_graph_1m(
+                bot_token=cfg.bot_token,
+                channel_id=cfg.channel_id,
+                image_bytes=generate_fx_graph(fx_history),
+                fx_rate=fx_rate,
+                stats=stats,
+            )
+    except Exception as e:
+        logger.warning("결제 알림 환율 그래프 발송 실패 (무시): %s", e)
+
     return 0
 
 
