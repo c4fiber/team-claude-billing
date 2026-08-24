@@ -1,0 +1,95 @@
+name: Update Config
+
+# KV 도메인 설정을 GitHub Actions UI에서 바로 변경합니다.
+# 터미널/wrangler CLI 없이 시트 구성·가격을 수정할 때 사용.
+#
+# 사용법: Actions 탭 → Update Config → Run workflow → 변경할 값 입력 → Run
+#   - 비워두면 해당 키는 변경하지 않습니다.
+#   - 변경 후 Workers/Notifier 재배포 없이 다음 실행부터 즉시 반영됩니다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      standard_seats:
+        description: 'Standard 시트 수 (예: 3) — 비워두면 변경 안 함'
+        required: false
+        type: string
+      premium_seats:
+        description: 'Premium 시트 수 (예: 2) — 비워두면 변경 안 함'
+        required: false
+        type: string
+      standard_price_usd:
+        description: 'Standard 시트 월 USD (예: 25) — 비워두면 변경 안 함'
+        required: false
+        type: string
+      premium_price_usd:
+        description: 'Premium 시트 월 USD (예: 125) — 비워두면 변경 안 함'
+        required: false
+        type: string
+
+jobs:
+  update-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Update KV config
+        working-directory: workers
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          KV_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+          STANDARD_SEATS: ${{ github.event.inputs.standard_seats }}
+          PREMIUM_SEATS: ${{ github.event.inputs.premium_seats }}
+          STANDARD_PRICE: ${{ github.event.inputs.standard_price_usd }}
+          PREMIUM_PRICE: ${{ github.event.inputs.premium_price_usd }}
+        run: |
+          echo "=== 변경 전 현재 값 ==="
+          echo -n "config:standard_seats    = "; wrangler kv key get --namespace-id="$KV_ID" "config:standard_seats" --remote --text 2>/dev/null || echo "(없음)"
+          echo -n "config:premium_seats     = "; wrangler kv key get --namespace-id="$KV_ID" "config:premium_seats" --remote --text 2>/dev/null || echo "(없음)"
+          echo -n "config:standard_price_usd = "; wrangler kv key get --namespace-id="$KV_ID" "config:standard_price_usd" --remote --text 2>/dev/null || echo "(없음)"
+          echo -n "config:premium_price_usd  = "; wrangler kv key get --namespace-id="$KV_ID" "config:premium_price_usd" --remote --text 2>/dev/null || echo "(없음)"
+
+          echo ""
+          echo "=== 변경 적용 ==="
+          CHANGED=0
+          if [ -n "$STANDARD_SEATS" ]; then
+            wrangler kv key put --namespace-id="$KV_ID" "config:standard_seats" "$STANDARD_SEATS" --remote
+            echo "✅ standard_seats → $STANDARD_SEATS"
+            CHANGED=1
+          fi
+          if [ -n "$PREMIUM_SEATS" ]; then
+            wrangler kv key put --namespace-id="$KV_ID" "config:premium_seats" "$PREMIUM_SEATS" --remote
+            echo "✅ premium_seats → $PREMIUM_SEATS"
+            CHANGED=1
+          fi
+          if [ -n "$STANDARD_PRICE" ]; then
+            wrangler kv key put --namespace-id="$KV_ID" "config:standard_price_usd" "$STANDARD_PRICE" --remote
+            echo "✅ standard_price_usd → $STANDARD_PRICE"
+            CHANGED=1
+          fi
+          if [ -n "$PREMIUM_PRICE" ]; then
+            wrangler kv key put --namespace-id="$KV_ID" "config:premium_price_usd" "$PREMIUM_PRICE" --remote
+            echo "✅ premium_price_usd → $PREMIUM_PRICE"
+            CHANGED=1
+          fi
+          if [ "$CHANGED" -eq 0 ]; then
+            echo "변경할 값이 없습니다. 최소 하나의 필드를 입력하세요."
+            exit 1
+          fi
+
+          echo ""
+          echo "=== 변경 후 확인 ==="
+          echo -n "config:standard_seats    = "; wrangler kv key get --namespace-id="$KV_ID" "config:standard_seats" --remote --text 2>/dev/null || echo "(없음)"
+          echo -n "config:premium_seats     = "; wrangler kv key get --namespace-id="$KV_ID" "config:premium_seats" --remote --text 2>/dev/null || echo "(없음)"
+          echo -n "config:standard_price_usd = "; wrangler kv key get --namespace-id="$KV_ID" "config:standard_price_usd" --remote --text 2>/dev/null || echo "(없음)"
+          echo -n "config:premium_price_usd  = "; wrangler kv key get --namespace-id="$KV_ID" "config:premium_price_usd" --remote --text 2>/dev/null || echo "(없음)"
