@@ -43,6 +43,24 @@ const commands = [
     name: 'help',
     description: '사용 가능한 명령어 안내.',
   },
+  {
+    name: 'add-member',
+    description: '이메일 라우팅 등록 (관리자 전용).',
+    options: [
+      {
+        type: 3, // STRING
+        name: 'prefix',
+        description: '이메일 prefix (예: john → john@yourdomain.com)',
+        required: true,
+      },
+      {
+        type: 3, // STRING
+        name: 'email',
+        description: '실제 수신 이메일 주소 (예: john@gmail.com)',
+        required: true,
+      },
+    ],
+  },
 ];
 
 const url = GUILD_ID

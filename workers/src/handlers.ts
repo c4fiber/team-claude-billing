@@ -18,6 +18,7 @@ import {
 } from './types';
 import { DepositStore, getCurrentMonthKey, DepositMap } from './store';
 import { ConfigStore, FxRateSnapshot } from './config_store';
+import { addDestinationAddress, createRoutingRule } from './email_routing';
 
 export interface Env {
   DISCORD_PUBLIC_KEY: string;
@@ -25,6 +26,9 @@ export interface Env {
   DISCORD_APP_ID: string;
   DEPOSITS_KV: KVNamespace;
   TIMEZONE?: string;
+  // 이메일 라우팅 자동화 (선택 — 미설정 시 /add-member 비활성)
+  CF_ZONE_ID?: string;
+  CF_EMAIL_API_TOKEN?: string;
   // 시트 구성/가격은 KV의 config:* 키에서 읽음 (Workers와 Notifier 간 SSoT)
 }
 
@@ -57,6 +61,9 @@ export async function handleInteraction(
     }
     if (cmdName === 'help') {
       return await handleHelp();
+    }
+    if (cmdName === 'add-member') {
+      return await handleAddMember(interaction, env, configStore);
     }
   }
 
@@ -264,6 +271,7 @@ async function handleHelp(): Promise<Response> {
     '',
     '`/status` — 이번 달 입금 현황 조회',
     '`/rate` — 환율 안내',
+    '`/add-member` — 이메일 라우팅 등록 (관리자 전용)',
     '`/help` — 이 도움말',
     '',
     '결제 알림 메시지의 **[✅ 입금완료]** 버튼을 누르면 본인을 입금자로 표시합니다.',
@@ -273,6 +281,97 @@ async function handleHelp(): Promise<Response> {
   return jsonResponse({
     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
     data: { content, flags: MessageFlags.EPHEMERAL },
+  });
+}
+
+async function handleAddMember(
+  interaction: DiscordInteraction,
+  env: Env,
+  configStore: ConfigStore,
+): Promise<Response> {
+  // 관리자 권한 확인 (Administrator 비트: 0x8)
+  const perms = BigInt(interaction.member?.permissions ?? '0');
+  if ((perms & BigInt(0x8)) === BigInt(0)) {
+    return jsonResponse({
+      type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+      data: { content: '⛔ 관리자만 사용할 수 있는 커맨드입니다.', flags: MessageFlags.EPHEMERAL },
+    });
+  }
+
+  if (!env.CF_ZONE_ID || !env.CF_EMAIL_API_TOKEN) {
+    return jsonResponse({
+      type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        content: '⚠️ `CF_ZONE_ID` 또는 `CF_EMAIL_API_TOKEN` Workers 시크릿이 설정되지 않았습니다.',
+        flags: MessageFlags.EPHEMERAL,
+      },
+    });
+  }
+
+  const options = interaction.data?.options ?? [];
+  const prefix = options.find((o) => o.name === 'prefix')?.value as string | undefined;
+  const destEmail = options.find((o) => o.name === 'email')?.value as string | undefined;
+
+  if (!prefix || !destEmail) {
+    return jsonResponse({
+      type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+      data: { content: '⚠️ `prefix`와 `email` 옵션이 모두 필요합니다.', flags: MessageFlags.EPHEMERAL },
+    });
+  }
+
+  const domain = await configStore.get('email_domain');
+  if (!domain) {
+    return jsonResponse({
+      type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        content: '⚠️ KV에 `config:email_domain`이 설정되지 않았습니다.\n`wrangler kv key put "config:email_domain" "yourdomain.com" --remote` 로 등록하세요.',
+        flags: MessageFlags.EPHEMERAL,
+      },
+    });
+  }
+
+  const fromAddress = `${prefix}@${domain}`;
+
+  // 1. 목적지 이메일 등록
+  const destResult = await addDestinationAddress(env.CF_ZONE_ID, env.CF_EMAIL_API_TOKEN, destEmail);
+  if (!destResult.success) {
+    return jsonResponse({
+      type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        content: `❌ 목적지 이메일 등록 실패: ${destResult.message}`,
+        flags: MessageFlags.EPHEMERAL,
+      },
+    });
+  }
+
+  // 2. 라우팅 규칙 생성
+  const ruleResult = await createRoutingRule(env.CF_ZONE_ID, env.CF_EMAIL_API_TOKEN, fromAddress, destEmail);
+  if (!ruleResult.success) {
+    return jsonResponse({
+      type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        content: `❌ 라우팅 규칙 생성 실패: ${ruleResult.message}`,
+        flags: MessageFlags.EPHEMERAL,
+      },
+    });
+  }
+
+  const lines = [
+    `✅ 이메일 라우팅 등록 완료`,
+    `\`${fromAddress}\` → \`${destEmail}\``,
+  ];
+
+  if (ruleResult.alreadyExists) {
+    lines.push('ℹ️ 라우팅 규칙이 이미 존재합니다.');
+  }
+  if (!destResult.alreadyExists) {
+    lines.push(`\n📧 **${destEmail}** 으로 Cloudflare 인증 이메일이 발송되었습니다.`);
+    lines.push('인증 완료 후 라우팅이 활성화됩니다.');
+  }
+
+  return jsonResponse({
+    type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+    data: { content: lines.join('\n'), flags: MessageFlags.EPHEMERAL },
   });
 }
 

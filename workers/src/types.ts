@@ -61,6 +61,7 @@ export interface DiscordInteraction {
   };
   member?: {
     user: DiscordUser;
+    permissions?: string; // 비트 플래그 문자열 (예: "8" = Administrator)
   };
   user?: DiscordUser;
   guild_id?: string;
