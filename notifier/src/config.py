@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from .kv_reader import fetch_config_int
+from .kv_reader import fetch_config_int, fetch_config_float
 
 
 @dataclass(frozen=True)
@@ -79,6 +79,21 @@ class Config:
             "premium_price_usd", fallback=125,
         )
 
+        # 운영 파라미터: KV 우선, 없으면 환경변수, 없으면 기본값
+        # KV 키: config:vat_rate, config:safety_margin, config:billing_day
+        vat_rate = fetch_config_float(
+            cf_account_id, cf_kv_namespace_id, cf_api_token,
+            "vat_rate", fallback=float(os.environ.get("VAT_RATE", "0.10")),
+        )
+        safety_margin = fetch_config_float(
+            cf_account_id, cf_kv_namespace_id, cf_api_token,
+            "safety_margin", fallback=float(os.environ.get("SAFETY_MARGIN", "0.05")),
+        )
+        billing_day = fetch_config_int(
+            cf_account_id, cf_kv_namespace_id, cf_api_token,
+            "billing_day", fallback=int(os.environ.get("BILLING_DAY", "15")),
+        )
+
         return cls(
             bot_token=req("DISCORD_BOT_TOKEN"),
             channel_id=req("DISCORD_CHANNEL_ID"),
@@ -90,9 +105,9 @@ class Config:
             premium_seats=premium_seats,
             standard_price_usd=standard_price,
             premium_price_usd=premium_price,
-            vat_rate=float(os.environ.get("VAT_RATE", "0.10")),
-            safety_margin=float(os.environ.get("SAFETY_MARGIN", "0.05")),
-            billing_day=int(os.environ.get("BILLING_DAY", "15")),
+            vat_rate=vat_rate,
+            safety_margin=safety_margin,
+            billing_day=billing_day,
         )
 
     @property
