@@ -1,11 +1,14 @@
 name: Update Config
 
 # KV 도메인 설정을 GitHub Actions UI에서 바로 변경합니다.
-# 터미널/wrangler CLI 없이 시트 구성·가격을 수정할 때 사용.
+# 터미널/wrangler CLI 없이 시트 구성·가격·운영 파라미터를 수정할 때 사용.
 #
 # 사용법: Actions 탭 → Update Config → Run workflow → 변경할 값 입력 → Run
 #   - 비워두면 해당 키는 변경하지 않습니다.
 #   - 변경 후 Workers/Notifier 재배포 없이 다음 실행부터 즉시 반영됩니다.
+#
+# 운영 파라미터 우선순위: KV > 환경변수(GitHub Variables) > 기본값
+# KV에 값이 있으면 GitHub Variables(VAT_RATE, SAFETY_MARGIN 등)보다 KV가 우선 적용됩니다.
 
 on:
   workflow_dispatch:
@@ -24,6 +27,18 @@ on:
         type: string
       premium_price_usd:
         description: 'Premium 시트 월 USD (예: 125) — 비워두면 변경 안 함'
+        required: false
+        type: string
+      safety_margin:
+        description: '안전 마진 (예: 0.03 = 3%) — 비워두면 변경 안 함'
+        required: false
+        type: string
+      vat_rate:
+        description: '부가세율 (예: 0.10 = 10%) — 비워두면 변경 안 함'
+        required: false
+        type: string
+      billing_day:
+        description: '매월 결제일 (예: 15) — 비워두면 변경 안 함'
         required: false
         type: string
 
@@ -52,36 +67,46 @@ jobs:
           PREMIUM_SEATS: ${{ github.event.inputs.premium_seats }}
           STANDARD_PRICE: ${{ github.event.inputs.standard_price_usd }}
           PREMIUM_PRICE: ${{ github.event.inputs.premium_price_usd }}
+          SAFETY_MARGIN: ${{ github.event.inputs.safety_margin }}
+          VAT_RATE: ${{ github.event.inputs.vat_rate }}
+          BILLING_DAY: ${{ github.event.inputs.billing_day }}
         run: |
+          ALL_KEYS=(
+            "config:standard_seats"
+            "config:premium_seats"
+            "config:standard_price_usd"
+            "config:premium_price_usd"
+            "config:safety_margin"
+            "config:vat_rate"
+            "config:billing_day"
+          )
+
           echo "=== 변경 전 현재 값 ==="
-          echo -n "config:standard_seats    = "; wrangler kv key get --namespace-id="$KV_ID" "config:standard_seats" --remote --text 2>/dev/null || echo "(없음)"
-          echo -n "config:premium_seats     = "; wrangler kv key get --namespace-id="$KV_ID" "config:premium_seats" --remote --text 2>/dev/null || echo "(없음)"
-          echo -n "config:standard_price_usd = "; wrangler kv key get --namespace-id="$KV_ID" "config:standard_price_usd" --remote --text 2>/dev/null || echo "(없음)"
-          echo -n "config:premium_price_usd  = "; wrangler kv key get --namespace-id="$KV_ID" "config:premium_price_usd" --remote --text 2>/dev/null || echo "(없음)"
+          for KEY in "${ALL_KEYS[@]}"; do
+            printf "%-30s = " "$KEY"
+            wrangler kv key get --namespace-id="$KV_ID" "$KEY" --remote --text 2>/dev/null || echo "(없음)"
+          done
 
           echo ""
           echo "=== 변경 적용 ==="
           CHANGED=0
-          if [ -n "$STANDARD_SEATS" ]; then
-            wrangler kv key put --namespace-id="$KV_ID" "config:standard_seats" "$STANDARD_SEATS" --remote
-            echo "✅ standard_seats → $STANDARD_SEATS"
-            CHANGED=1
-          fi
-          if [ -n "$PREMIUM_SEATS" ]; then
-            wrangler kv key put --namespace-id="$KV_ID" "config:premium_seats" "$PREMIUM_SEATS" --remote
-            echo "✅ premium_seats → $PREMIUM_SEATS"
-            CHANGED=1
-          fi
-          if [ -n "$STANDARD_PRICE" ]; then
-            wrangler kv key put --namespace-id="$KV_ID" "config:standard_price_usd" "$STANDARD_PRICE" --remote
-            echo "✅ standard_price_usd → $STANDARD_PRICE"
-            CHANGED=1
-          fi
-          if [ -n "$PREMIUM_PRICE" ]; then
-            wrangler kv key put --namespace-id="$KV_ID" "config:premium_price_usd" "$PREMIUM_PRICE" --remote
-            echo "✅ premium_price_usd → $PREMIUM_PRICE"
-            CHANGED=1
-          fi
+          put_kv() {
+            local KEY="$1" VAL="$2" LABEL="$3"
+            if [ -n "$VAL" ]; then
+              wrangler kv key put --namespace-id="$KV_ID" "$KEY" "$VAL" --remote
+              echo "✅ $LABEL → $VAL"
+              CHANGED=1
+            fi
+          }
+
+          put_kv "config:standard_seats"     "$STANDARD_SEATS"  "standard_seats"
+          put_kv "config:premium_seats"      "$PREMIUM_SEATS"   "premium_seats"
+          put_kv "config:standard_price_usd" "$STANDARD_PRICE"  "standard_price_usd"
+          put_kv "config:premium_price_usd"  "$PREMIUM_PRICE"   "premium_price_usd"
+          put_kv "config:safety_margin"      "$SAFETY_MARGIN"   "safety_margin"
+          put_kv "config:vat_rate"           "$VAT_RATE"        "vat_rate"
+          put_kv "config:billing_day"        "$BILLING_DAY"     "billing_day"
+
           if [ "$CHANGED" -eq 0 ]; then
             echo "변경할 값이 없습니다. 최소 하나의 필드를 입력하세요."
             exit 1
@@ -89,7 +114,7 @@ jobs:
 
           echo ""
           echo "=== 변경 후 확인 ==="
-          echo -n "config:standard_seats    = "; wrangler kv key get --namespace-id="$KV_ID" "config:standard_seats" --remote --text 2>/dev/null || echo "(없음)"
-          echo -n "config:premium_seats     = "; wrangler kv key get --namespace-id="$KV_ID" "config:premium_seats" --remote --text 2>/dev/null || echo "(없음)"
-          echo -n "config:standard_price_usd = "; wrangler kv key get --namespace-id="$KV_ID" "config:standard_price_usd" --remote --text 2>/dev/null || echo "(없음)"
-          echo -n "config:premium_price_usd  = "; wrangler kv key get --namespace-id="$KV_ID" "config:premium_price_usd" --remote --text 2>/dev/null || echo "(없음)"
+          for KEY in "${ALL_KEYS[@]}"; do
+            printf "%-30s = " "$KEY"
+            wrangler kv key get --namespace-id="$KV_ID" "$KEY" --remote --text 2>/dev/null || echo "(없음)"
+          done

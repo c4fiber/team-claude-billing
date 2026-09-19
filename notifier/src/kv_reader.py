@@ -63,6 +63,25 @@ def fetch_current_deposits(
     return DepositSnapshot(month_key=month_key, paid_users=paid, unpaid_users=unpaid)
 
 
+def fetch_config_float(
+    account_id: str,
+    namespace_id: str,
+    api_token: str,
+    config_key: str,
+    fallback: float,
+) -> float:
+    """KV에서 도메인 설정값을 실수로 가져옵니다. 키가 없거나 파싱 실패 시 fallback."""
+    kv_key = f"config:{config_key}"
+    raw = _fetch_kv_value(account_id, namespace_id, api_token, kv_key)
+    if raw is None:
+        return fallback
+    try:
+        return float(raw.strip())
+    except (ValueError, AttributeError) as e:
+        logger.error("config:%s 실수 파싱 실패 (값=%r): %s. fallback=%s.", config_key, raw, e, fallback)
+        return fallback
+
+
 def fetch_config_int(
     account_id: str,
     namespace_id: str,
