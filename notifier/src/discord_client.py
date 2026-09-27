@@ -161,7 +161,12 @@ def post_monthly_report(
                 "inline": True,
             },
         ],
-        "footer": {"text": "안전 마진 5% + VAT 10% 적용 기준"},
+        "footer": {
+            "text": (
+                f"안전 마진 {next_month_calc.safety_margin * 100:.0f}% + "
+                f"VAT {next_month_calc.vat_rate * 100:.0f}% 적용 기준"
+            ),
+        },
     }
 
     _post_message(bot_token, channel_id, {"embeds": [embed]})
