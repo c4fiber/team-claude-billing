@@ -7,8 +7,9 @@ name: Update Config
 #   - 비워두면 해당 키는 변경하지 않습니다.
 #   - 변경 후 Workers/Notifier 재배포 없이 다음 실행부터 즉시 반영됩니다.
 #
-# 운영 파라미터 우선순위: KV > 환경변수(GitHub Variables) > 기본값
-# KV에 값이 있으면 GitHub Variables(VAT_RATE, SAFETY_MARGIN 등)보다 KV가 우선 적용됩니다.
+# 운영 파라미터 우선순위: KV > 코드 기본값(vat_rate=0.10, safety_margin=0.05, billing_day=15)
+# GitHub Variables(VAT_RATE, SAFETY_MARGIN, BILLING_DAY)는 더 이상 사용하지 않습니다.
+# 값을 바꾸려면 반드시 이 workflow로 KV를 갱신하세요 — 이중 소스로 인한 혼선을 방지합니다.
 
 on:
   workflow_dispatch:

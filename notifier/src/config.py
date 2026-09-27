@@ -38,7 +38,7 @@ class Config:
     standard_price_usd: int = 25
     premium_price_usd: int = 125
 
-    # 운영 파라미터 (환경변수)
+    # 운영 파라미터 — KV의 config:* 키에서 읽음 (Update Config workflow로 변경)
     vat_rate: float = 0.10       # 한국 부가세 10%
     safety_margin: float = 0.05  # 5% 안전 마진
     billing_day: int = 15        # 매월 결제일
@@ -79,19 +79,21 @@ class Config:
             "premium_price_usd", fallback=125,
         )
 
-        # 운영 파라미터: KV 우선, 없으면 환경변수, 없으면 기본값
+        # 운영 파라미터: KV 우선, 없으면 코드 기본값.
+        # GitHub Variables(VAT_RATE 등)는 더 이상 사용하지 않음 — KV와 이중 소스로
+        # 값이 어긋나는 것을 방지하기 위해 Update Config workflow로만 변경합니다.
         # KV 키: config:vat_rate, config:safety_margin, config:billing_day
         vat_rate = fetch_config_float(
             cf_account_id, cf_kv_namespace_id, cf_api_token,
-            "vat_rate", fallback=float(os.environ.get("VAT_RATE", "0.10")),
+            "vat_rate", fallback=0.10,
         )
         safety_margin = fetch_config_float(
             cf_account_id, cf_kv_namespace_id, cf_api_token,
-            "safety_margin", fallback=float(os.environ.get("SAFETY_MARGIN", "0.05")),
+            "safety_margin", fallback=0.05,
         )
         billing_day = fetch_config_int(
             cf_account_id, cf_kv_namespace_id, cf_api_token,
-            "billing_day", fallback=int(os.environ.get("BILLING_DAY", "15")),
+            "billing_day", fallback=15,
         )
 
         return cls(
