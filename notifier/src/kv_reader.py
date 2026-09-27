@@ -74,6 +74,7 @@ def fetch_config_float(
     kv_key = f"config:{config_key}"
     raw = _fetch_kv_value(account_id, namespace_id, api_token, kv_key)
     if raw is None:
+        logger.warning("KV에 config:%s 키가 없습니다. fallback=%s 사용.", config_key, fallback)
         return fallback
     try:
         return float(raw.strip())
