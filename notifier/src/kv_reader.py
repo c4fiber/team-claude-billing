@@ -12,6 +12,7 @@ Cloudflare API 토큰 발급:
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -61,6 +62,35 @@ def fetch_current_deposits(
     paid = [d["username"] for d in data.values() if d.get("paid")]
     unpaid = [d["username"] for d in data.values() if not d.get("paid")]
     return DepositSnapshot(month_key=month_key, paid_users=paid, unpaid_users=unpaid)
+
+
+def fetch_locked_billing_rate(
+    account_id: str,
+    namespace_id: str,
+    api_token: str,
+    billing_date_iso: str,
+) -> float | None:
+    """이번 결제 주기(billing_date)에 고정된 환율을 조회.
+
+    D-7에서 확인한 환율을 D-3에서도 동일하게 사용하기 위한 캐시.
+    저장된 billing_date가 이번 결제일과 다르면(=지난 주기 값이면) None 반환
+    → 호출 측에서 새로 조회해 고정합니다.
+    """
+    raw = _fetch_kv_value(account_id, namespace_id, api_token, "fx:locked_rate")
+    if raw is None:
+        return None
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError) as e:
+        logger.warning("fx:locked_rate 파싱 실패: %s", e)
+        return None
+    if data.get("billing_date") != billing_date_iso:
+        return None
+    try:
+        return float(data["rate"])
+    except (KeyError, ValueError, TypeError) as e:
+        logger.warning("fx:locked_rate 값 파싱 실패 (%r): %s", data, e)
+        return None
 
 
 def fetch_config_float(
@@ -138,7 +168,6 @@ def _fetch_kv_value(
 
 def _parse_json(raw: str) -> dict:
     """JSON 파싱. 실패 시 ValueError."""
-    import json
     try:
         data = json.loads(raw)
         if not isinstance(data, dict):
