@@ -58,12 +58,13 @@ npx wrangler kv:namespace create DEPOSITS_KV
 
 출력된 `id`를 `wrangler.toml`의 `REPLACE_WITH_KV_NAMESPACE_ID` 자리에 붙여넣기.
 
-### 2-3. 도메인 설정 등록 (시트 구성 + 가격)
+### 2-3. 도메인 설정 등록 (시트 구성 + 가격 + 운영 파라미터)
 
 KV는 입금 상태뿐 아니라 **도메인 설정의 SSoT** 역할도 합니다.
-시트 구성과 가격은 Workers와 Notifier 양쪽이 같은 KV 값을 읽으므로 단일 관리됩니다.
+시트 구성, 가격, 운영 파라미터(부가세율/안전마진/결제일) 모두 Workers와 Notifier
+양쪽이 같은 KV 값을 읽으므로 단일 관리됩니다. GitHub Variables는 사용하지 않습니다.
 
-4개 핵심 키를 등록합니다:
+7개 핵심 키를 등록합니다:
 
 ```bash
 # wrangler.toml에 등록한 KV id를 변수로
@@ -77,6 +78,11 @@ npx wrangler kv key put --namespace-id="$KV_ID" "config:premium_seats" "2" --rem
 npx wrangler kv key put --namespace-id="$KV_ID" "config:standard_price_usd" "25" --remote
 npx wrangler kv key put --namespace-id="$KV_ID" "config:premium_price_usd" "125" --remote
 
+# 운영 파라미터 (미등록 시 코드 기본값 vat_rate=0.10 / safety_margin=0.05 / billing_day=15 사용)
+npx wrangler kv key put --namespace-id="$KV_ID" "config:vat_rate" "0.10" --remote
+npx wrangler kv key put --namespace-id="$KV_ID" "config:safety_margin" "0.05" --remote
+npx wrangler kv key put --namespace-id="$KV_ID" "config:billing_day" "15" --remote
+
 # 검증 (--text 플래그 필수, 안 그러면 출력이 안 보임)
 npx wrangler kv key get --namespace-id="$KV_ID" "config:standard_seats" --remote --text
 # → 3
@@ -86,7 +92,9 @@ npx wrangler kv key get --namespace-id="$KV_ID" "config:premium_seats" --remote 
 
 ⚠️ **`--remote` 없이 실행하면 로컬 시뮬레이터에만 등록되고 production Workers는 이 값을 못 봅니다.** 자세한 내용은 [OPERATIONS.md](./OPERATIONS.md)의 "모든 KV 명령어에 `--remote` 필수" 섹션 참고.
 
-> 향후 시트 구성 변경 시 같은 명령을 다시 실행하면 됩니다. Workers 재배포 불필요.
+> 향후 값 변경 시 같은 명령을 다시 실행하거나, 터미널 없이 GitHub Actions의
+> **Update Config** 워크플로우(Actions 탭 → Update Config → Run workflow)를
+> 사용하면 됩니다. Workers/Notifier 재배포 불필요.
 > 자세한 운영 명령은 [OPERATIONS.md](./OPERATIONS.md) 참고.
 
 ### 2-4. 비밀 값 등록
@@ -174,14 +182,14 @@ https://www.koreaexim.go.kr/ir/HPHKIR020M01?apino=2&viewtype=C
 | `CF_API_TOKEN` | 3-1번 |
 | `KOREAEXIM_API_KEY` | 3-3번 |
 
-**Variables** (공개 가능, 선택):
-| Name | Default | 설명 |
-|------|---------|------|
-| `VAT_RATE` | `0.10` | 한국 부가세 |
-| `SAFETY_MARGIN` | `0.05` | 안전 마진 |
-| `BILLING_DAY` | `15` | 매월 결제일 |
+**Variables**: 없음. 시트 구성/가격뿐 아니라 부가세율(`vat_rate`)·안전마진(`safety_margin`)·
+결제일(`billing_day`)까지 GitHub Variables가 아닌 **KV의 `config:*` 키**에서 읽습니다
+(2-3 단계에서 등록). Workers와 Notifier가 같은 KV 값을 참조하는 단일 SSoT 구조이며,
+KV에 값이 없으면 코드에 내장된 기본값(`vat_rate=0.10`, `safety_margin=0.05`,
+`billing_day=15`)이 적용됩니다.
 
-> **참고**: 시트 구성과 가격(Standard/Premium 시트 수, 시트별 USD)은 GitHub Variables가 아닌 **KV의 `config:*` 키**에서 읽습니다 (2-3 단계에서 등록). Workers와 Notifier가 같은 KV 값을 참조하는 SSoT 구조입니다. 시트 변경(예: Standard ↔ Premium) 운영은 [OPERATIONS.md](./OPERATIONS.md) 참고.
+> 값 변경은 [OPERATIONS.md](./OPERATIONS.md) 또는 GitHub Actions의 **Update Config**
+> 워크플로우를 참고하세요.
 
 ### 3-5. GitHub Actions 워크플로우 구조
 
