@@ -22,7 +22,7 @@ import json
 
 from .calculator import calculate_billing
 from .config import Config
-from .discord_client import post_billing_alert, post_monthly_report, post_rate_graph, post_rate_graph_1m
+from .discord_client import post_billing_alert, post_monthly_report, post_rate_graph
 from .fx_client import fetch_usd_krw_rate, fetch_usd_krw_history, fetch_usd_krw_history_30d
 from .kv_reader import fetch_current_deposits
 from .kv_writer import put_kv_value
@@ -97,6 +97,33 @@ def run_auto(cfg: Config, today: date) -> int:
 
 def run_billing_alert(cfg: Config, today: date, days_until: int) -> int:
     fx_rate = fetch_usd_krw_rate(cfg.koreaexim_api_key)
+
+    # 결제 알림 발송 전 1개월·3개월 환율 그래프 먼저 발송
+    try:
+        from .graph_generator import generate_fx_graph
+        fx_history = fetch_usd_krw_history(cfg.koreaexim_api_key, business_days=90)
+        if fx_history:
+            if fx_history[-1][0] != today.isoformat():
+                fx_history.append((today.isoformat(), fx_rate))
+
+            def _stats(h: list[tuple[str, float]]) -> dict:
+                rates = [r for _, r in h]
+                return {"avg": sum(rates) / len(rates), "high": max(rates), "low": min(rates), "count": len(rates)}
+
+            history_1m = fx_history[-30:]
+            history_3m = fx_history
+            post_rate_graph(
+                bot_token=cfg.bot_token,
+                channel_id=cfg.channel_id,
+                image_1m=generate_fx_graph(history_1m),
+                image_3m=generate_fx_graph(history_3m),
+                fx_rate=fx_rate,
+                stats_1m=_stats(history_1m),
+                stats_3m=_stats(history_3m),
+            )
+    except Exception as e:
+        logger.warning("결제 알림 환율 그래프 발송 실패 (무시): %s", e)
+
     history = load_history()
     carryover = previous_carryover(history)
 
@@ -128,25 +155,6 @@ def run_billing_alert(cfg: Config, today: date, days_until: int) -> int:
         days_until_billing=days_until,
         billing_date_str=billing_date_str,
     )
-
-    # 결제 알림과 함께 최근 1개월 환율 그래프 발송
-    try:
-        from .graph_generator import generate_fx_graph
-        fx_history = fetch_usd_krw_history(cfg.koreaexim_api_key, business_days=30)
-        if fx_history:
-            if fx_history[-1][0] != today.isoformat():
-                fx_history.append((today.isoformat(), fx_rate))
-            rates = [r for _, r in fx_history]
-            stats = {"avg": sum(rates) / len(rates), "high": max(rates), "low": min(rates), "count": len(rates)}
-            post_rate_graph_1m(
-                bot_token=cfg.bot_token,
-                channel_id=cfg.channel_id,
-                image_bytes=generate_fx_graph(fx_history),
-                fx_rate=fx_rate,
-                stats=stats,
-            )
-    except Exception as e:
-        logger.warning("결제 알림 환율 그래프 발송 실패 (무시): %s", e)
 
     return 0
 
