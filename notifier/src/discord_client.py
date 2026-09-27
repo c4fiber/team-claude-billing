@@ -53,7 +53,7 @@ def post_billing_alert(
     description_lines = [
         *amount_lines,
         "",
-        f"적용 환율: `{calc.fx_rate:,.2f}` KRW/USD",
+        f"적용 환율 (최근 1개월 평균): `{calc.fx_rate:,.2f}` KRW/USD",
         f"안전 마진: {calc.safety_margin * 100:.0f}% (환율·수수료 변동 대비)",
     ]
 

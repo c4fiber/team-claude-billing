@@ -23,7 +23,7 @@ import json
 from .calculator import calculate_billing
 from .config import Config
 from .discord_client import post_billing_alert, post_monthly_report, post_rate_graph
-from .fx_client import fetch_usd_krw_rate, fetch_usd_krw_history, fetch_usd_krw_history_30d
+from .fx_client import fetch_usd_krw_rate, fetch_usd_krw_history, fetch_usd_krw_history_30d, fetch_usd_krw_avg
 from .kv_reader import fetch_current_deposits
 from .kv_writer import put_kv_value
 from .surplus_store import load_history, previous_carryover
@@ -96,21 +96,27 @@ def run_auto(cfg: Config, today: date) -> int:
 
 
 def run_billing_alert(cfg: Config, today: date, days_until: int) -> int:
-    fx_rate = fetch_usd_krw_rate(cfg.koreaexim_api_key)
+    fx_rate = fetch_usd_krw_rate(cfg.koreaexim_api_key)  # 스팟 환율 (그래프 "현재" 표시용)
+
+    fx_history = fetch_usd_krw_history(cfg.koreaexim_api_key, business_days=90)
+    if fx_history and fx_history[-1][0] != today.isoformat():
+        fx_history.append((today.isoformat(), fx_rate))
+
+    history_1m = fx_history[-30:] if fx_history else []
+    # 청구 계산은 당일 환율이 아닌 최근 1개월 평균으로 고정 (일별 변동 완화)
+    avg_rate_1m = (
+        sum(r for _, r in history_1m) / len(history_1m) if history_1m else fx_rate
+    )
 
     # 결제 알림 발송 전 1개월·3개월 환율 그래프 먼저 발송
     try:
         from .graph_generator import generate_fx_graph
-        fx_history = fetch_usd_krw_history(cfg.koreaexim_api_key, business_days=90)
-        if fx_history:
-            if fx_history[-1][0] != today.isoformat():
-                fx_history.append((today.isoformat(), fx_rate))
 
+        if fx_history:
             def _stats(h: list[tuple[str, float]]) -> dict:
                 rates = [r for _, r in h]
                 return {"avg": sum(rates) / len(rates), "high": max(rates), "low": min(rates), "count": len(rates)}
 
-            history_1m = fx_history[-30:]
             history_3m = fx_history
             post_rate_graph(
                 bot_token=cfg.bot_token,
@@ -128,7 +134,7 @@ def run_billing_alert(cfg: Config, today: date, days_until: int) -> int:
     carryover = previous_carryover(history)
 
     calc = calculate_billing(
-        fx_rate=fx_rate,
+        fx_rate=avg_rate_1m,
         standard_seats=cfg.standard_seats,
         premium_seats=cfg.premium_seats,
         standard_price_usd=cfg.standard_price_usd,
@@ -170,8 +176,11 @@ def run_monthly_report(cfg: Config, today: date) -> int:
 
     _save_rate_snapshot_to_kv(cfg, fx_rate, fx_history_30d, today)
 
+    # 다음 달 예상 청구액도 당일 환율이 아닌 최근 1개월 평균 기준
+    avg_rate_1m = sum(r for _, r in fx_history_30d) / len(fx_history_30d)
+
     estimate = calculate_billing(
-        fx_rate=fx_rate,
+        fx_rate=avg_rate_1m,
         standard_seats=cfg.standard_seats,
         premium_seats=cfg.premium_seats,
         standard_price_usd=cfg.standard_price_usd,
@@ -278,11 +287,12 @@ def _save_rate_snapshot_to_kv(
 def run_dry_run(cfg: Config, today: date) -> int:
     """실제 발송 없이 계산 결과만 출력."""
     fx_rate = fetch_usd_krw_rate(cfg.koreaexim_api_key)
+    avg_rate_1m = fetch_usd_krw_avg(cfg.koreaexim_api_key, business_days=30, fallback_rate=fx_rate)
     history = load_history()
     carryover = previous_carryover(history)
 
     calc = calculate_billing(
-        fx_rate=fx_rate,
+        fx_rate=avg_rate_1m,
         standard_seats=cfg.standard_seats,
         premium_seats=cfg.premium_seats,
         standard_price_usd=cfg.standard_price_usd,
@@ -298,7 +308,8 @@ def run_dry_run(cfg: Config, today: date) -> int:
         f"시트: Standard {cfg.standard_seats}명 (${cfg.standard_price_usd}/시트) + "
         f"Premium {cfg.premium_seats}명 (${cfg.premium_price_usd}/시트)"
     )
-    print(f"환율: {fx_rate:,.2f} KRW/USD")
+    print(f"환율(스팟): {fx_rate:,.2f} KRW/USD")
+    print(f"환율(적용, 1개월 평균): {avg_rate_1m:,.2f} KRW/USD")
     print(f"마진: {cfg.safety_margin*100:.0f}%, VAT: {cfg.vat_rate*100:.0f}%")
     print(f"이월: {carryover:,}원")
     print(f"총 청구 USD (VAT 포함): ${calc.total_usd:.2f}")
