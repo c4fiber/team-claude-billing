@@ -23,8 +23,8 @@ import json
 from .calculator import calculate_billing
 from .config import Config
 from .discord_client import post_billing_alert, post_monthly_report, post_rate_graph
-from .fx_client import fetch_usd_krw_rate, fetch_usd_krw_history, fetch_usd_krw_history_30d, fetch_usd_krw_avg
-from .kv_reader import fetch_current_deposits
+from .fx_client import fetch_usd_krw_rate, fetch_usd_krw_history, fetch_usd_krw_history_30d
+from .kv_reader import fetch_current_deposits, fetch_locked_billing_rate
 from .kv_writer import put_kv_value
 from .surplus_store import load_history, previous_carryover
 
@@ -96,27 +96,28 @@ def run_auto(cfg: Config, today: date) -> int:
 
 
 def run_billing_alert(cfg: Config, today: date, days_until: int) -> int:
-    fx_rate = fetch_usd_krw_rate(cfg.koreaexim_api_key)  # 스팟 환율 (그래프 "현재" 표시용)
+    fx_rate = fetch_usd_krw_rate(cfg.koreaexim_api_key)  # 가장 최근 조회 가능한 환율
 
-    fx_history = fetch_usd_krw_history(cfg.koreaexim_api_key, business_days=90)
-    if fx_history and fx_history[-1][0] != today.isoformat():
-        fx_history.append((today.isoformat(), fx_rate))
+    billing_date = next_billing_date(today, cfg.billing_day)
+    billing_date_str = billing_date.strftime("%Y년 %m월 %d일")
 
-    history_1m = fx_history[-30:] if fx_history else []
-    # 청구 계산은 당일 환율이 아닌 최근 1개월 평균으로 고정 (일별 변동 완화)
-    avg_rate_1m = (
-        sum(r for _, r in history_1m) / len(history_1m) if history_1m else fx_rate
-    )
+    # D-7과 D-3에서 서로 다른 환율이 쓰이지 않도록, 이번 결제 주기에서 처음
+    # 조회된 환율을 KV에 고정하고 이후(D-3 등)에는 그 값을 그대로 재사용.
+    fx_rate = _get_or_lock_billing_rate(cfg, billing_date, fx_rate)
 
     # 결제 알림 발송 전 1개월·3개월 환율 그래프 먼저 발송
     try:
         from .graph_generator import generate_fx_graph
-
+        fx_history = fetch_usd_krw_history(cfg.koreaexim_api_key, business_days=90)
         if fx_history:
+            if fx_history[-1][0] != today.isoformat():
+                fx_history.append((today.isoformat(), fx_rate))
+
             def _stats(h: list[tuple[str, float]]) -> dict:
                 rates = [r for _, r in h]
                 return {"avg": sum(rates) / len(rates), "high": max(rates), "low": min(rates), "count": len(rates)}
 
+            history_1m = fx_history[-30:]
             history_3m = fx_history
             post_rate_graph(
                 bot_token=cfg.bot_token,
@@ -134,7 +135,7 @@ def run_billing_alert(cfg: Config, today: date, days_until: int) -> int:
     carryover = previous_carryover(history)
 
     calc = calculate_billing(
-        fx_rate=avg_rate_1m,
+        fx_rate=fx_rate,
         standard_seats=cfg.standard_seats,
         premium_seats=cfg.premium_seats,
         standard_price_usd=cfg.standard_price_usd,
@@ -149,9 +150,6 @@ def run_billing_alert(cfg: Config, today: date, days_until: int) -> int:
         namespace_id=cfg.cf_kv_namespace_id,
         api_token=cfg.cf_api_token,
     )
-
-    billing_date = next_billing_date(today, cfg.billing_day)
-    billing_date_str = billing_date.strftime("%Y년 %m월 %d일")
 
     post_billing_alert(
         bot_token=cfg.bot_token,
@@ -176,11 +174,8 @@ def run_monthly_report(cfg: Config, today: date) -> int:
 
     _save_rate_snapshot_to_kv(cfg, fx_rate, fx_history_30d, today)
 
-    # 다음 달 예상 청구액도 당일 환율이 아닌 최근 1개월 평균 기준
-    avg_rate_1m = sum(r for _, r in fx_history_30d) / len(fx_history_30d)
-
     estimate = calculate_billing(
-        fx_rate=avg_rate_1m,
+        fx_rate=fx_rate,
         standard_seats=cfg.standard_seats,
         premium_seats=cfg.premium_seats,
         standard_price_usd=cfg.standard_price_usd,
@@ -243,6 +238,31 @@ def run_rate_graph(cfg: Config, today: date) -> int:
     return 0
 
 
+def _get_or_lock_billing_rate(cfg: Config, billing_date: date, spot_rate: float) -> float:
+    """이번 결제 주기(billing_date)에 고정할 환율을 반환.
+
+    D-7에서 이미 고정한 값이 있으면 그대로 재사용하고(D-3과 동일한 환율 보장),
+    없으면(이번 주기 첫 조회) 지금 조회한 스팟 환율을 KV에 고정해 반환합니다.
+    """
+    billing_date_iso = billing_date.isoformat()
+    locked = fetch_locked_billing_rate(
+        cfg.cf_account_id, cfg.cf_kv_namespace_id, cfg.cf_api_token, billing_date_iso,
+    )
+    if locked is not None:
+        logger.info("이번 결제 주기(%s) 고정 환율 재사용: %.2f", billing_date_iso, locked)
+        return locked
+
+    try:
+        put_kv_value(
+            cfg.cf_account_id, cfg.cf_kv_namespace_id, cfg.cf_api_token,
+            "fx:locked_rate", json.dumps({"billing_date": billing_date_iso, "rate": spot_rate}),
+        )
+        logger.info("이번 결제 주기(%s) 환율 고정: %.2f", billing_date_iso, spot_rate)
+    except Exception as e:
+        logger.warning("환율 고정 KV 저장 실패 (이번 실행은 스팟 환율로 계속 진행): %s", e)
+    return spot_rate
+
+
 def _cache_rate_graph_to_kv(cfg: Config, image_bytes: bytes) -> None:
     """PNG를 base64로 인코딩해 KV에 저장. Workers /rate 커맨드가 이 값을 읽어 반환."""
     encoded = base64.b64encode(image_bytes).decode("ascii")
@@ -287,12 +307,20 @@ def _save_rate_snapshot_to_kv(
 def run_dry_run(cfg: Config, today: date) -> int:
     """실제 발송 없이 계산 결과만 출력."""
     fx_rate = fetch_usd_krw_rate(cfg.koreaexim_api_key)
-    avg_rate_1m = fetch_usd_krw_avg(cfg.koreaexim_api_key, business_days=30, fallback_rate=fx_rate)
+
+    # 이번 결제 주기에 고정된 환율이 있으면 실제 billing-alert와 동일하게 그 값을 미리보기
+    # (dry-run은 조회만 하고 KV에 새로 고정하지는 않음)
+    billing_date = next_billing_date(today, cfg.billing_day)
+    locked_rate = fetch_locked_billing_rate(
+        cfg.cf_account_id, cfg.cf_kv_namespace_id, cfg.cf_api_token, billing_date.isoformat(),
+    )
+    effective_rate = locked_rate if locked_rate is not None else fx_rate
+
     history = load_history()
     carryover = previous_carryover(history)
 
     calc = calculate_billing(
-        fx_rate=avg_rate_1m,
+        fx_rate=effective_rate,
         standard_seats=cfg.standard_seats,
         premium_seats=cfg.premium_seats,
         standard_price_usd=cfg.standard_price_usd,
@@ -309,7 +337,8 @@ def run_dry_run(cfg: Config, today: date) -> int:
         f"Premium {cfg.premium_seats}명 (${cfg.premium_price_usd}/시트)"
     )
     print(f"환율(스팟): {fx_rate:,.2f} KRW/USD")
-    print(f"환율(적용, 1개월 평균): {avg_rate_1m:,.2f} KRW/USD")
+    if locked_rate is not None:
+        print(f"환율(이번 결제 주기 고정값, {billing_date}): {locked_rate:,.2f} KRW/USD")
     print(f"마진: {cfg.safety_margin*100:.0f}%, VAT: {cfg.vat_rate*100:.0f}%")
     print(f"이월: {carryover:,}원")
     print(f"총 청구 USD (VAT 포함): ${calc.total_usd:.2f}")

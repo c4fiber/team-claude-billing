@@ -76,30 +76,6 @@ def fetch_usd_krw_history_30d(api_key: str) -> list[tuple[str, float]]:
     return fetch_usd_krw_history(api_key, business_days=30)
 
 
-def fetch_usd_krw_avg(
-    api_key: str,
-    business_days: int = 30,
-    fallback_rate: float | None = None,
-) -> float:
-    """최근 N 영업일 평균 USD/KRW 환율.
-
-    청구 계산에 당일 환율 대신 평균을 사용해 일별 변동(및 API 장애 시
-    며칠 전 값으로 튀는 현상)의 영향을 완화합니다.
-    """
-    history = fetch_usd_krw_history(api_key, business_days=business_days)
-    if not history:
-        if fallback_rate is not None:
-            logger.warning(
-                "환율 이력을 가져올 수 없어 현재 환율(%.2f)을 평균 대신 사용합니다.",
-                fallback_rate,
-            )
-            return fallback_rate
-        raise ExchangeRateError("환율 이력 데이터를 가져올 수 없습니다.")
-
-    rates = [r for _, r in history]
-    return sum(rates) / len(rates)
-
-
 def _try_fetch(api_key: str, date) -> float | None:
     params = {
         "authkey": api_key,
