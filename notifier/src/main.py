@@ -3,9 +3,9 @@
 GitHub Actions에서 매일 실행되며, 결제일까지 남은 일수에 따라 알림을 발송합니다.
 
 트리거 조건:
-- 결제일 7일 전 → D-7 알림
-- 결제일 3일 전 → D-3 알림
-- 매월 1일 → 월간 리포트
+- 결제일 7일 전 (D-7) → 결제 알림 + 환율 변동폭 그래프(1개월·3개월)
+- 결제일 3일 전 (D-3) → 결제 알림만 (그래프 없음 — D-7과 중복 방지)
+- 매월 1일 → 월간 리포트만 (그래프 없음)
 - 그 외 → 아무 동작 없음
 """
 
@@ -75,21 +75,16 @@ def run_auto(cfg: Config, today: date) -> int:
     days_until = days_until_billing(today, cfg.billing_day)
 
     if today.day == 1:
-        logger.info("매월 1일 — 월간 리포트 + 환율 그래프 발송")
-        run_monthly_report(cfg, today)
-        return run_rate_graph(cfg, today)
+        logger.info("매월 1일 — 월간 리포트 발송")
+        return run_monthly_report(cfg, today)
 
     if days_until == 7:
-        logger.info("D-7 — 결제 알림 발송")
+        logger.info("D-7 — 결제 알림 + 환율 그래프 발송")
         return run_billing_alert(cfg, today, 7)
 
     if days_until == 3:
         logger.info("D-3 — 결제 알림 발송")
         return run_billing_alert(cfg, today, 3)
-
-    if days_until == 0:
-        logger.info("결제 당일 (D-0) — 환율 그래프 발송")
-        return run_rate_graph(cfg, today)
 
     logger.info("오늘은 알림 발송 대상이 아닙니다 (D-%d).", days_until)
     return 0
@@ -105,31 +100,12 @@ def run_billing_alert(cfg: Config, today: date, days_until: int) -> int:
     # 조회된 환율을 KV에 고정하고 이후(D-3 등)에는 그 값을 그대로 재사용.
     fx_rate = _get_or_lock_billing_rate(cfg, billing_date, fx_rate)
 
-    # 결제 알림 발송 전 1개월·3개월 환율 그래프 먼저 발송
-    try:
-        from .graph_generator import generate_fx_graph
-        fx_history = fetch_usd_krw_history(cfg.koreaexim_api_key, business_days=90)
-        if fx_history:
-            if fx_history[-1][0] != today.isoformat():
-                fx_history.append((today.isoformat(), fx_rate))
-
-            def _stats(h: list[tuple[str, float]]) -> dict:
-                rates = [r for _, r in h]
-                return {"avg": sum(rates) / len(rates), "high": max(rates), "low": min(rates), "count": len(rates)}
-
-            history_1m = fx_history[-30:]
-            history_3m = fx_history
-            post_rate_graph(
-                bot_token=cfg.bot_token,
-                channel_id=cfg.channel_id,
-                image_1m=generate_fx_graph(history_1m),
-                image_3m=generate_fx_graph(history_3m),
-                fx_rate=fx_rate,
-                stats_1m=_stats(history_1m),
-                stats_3m=_stats(history_3m),
-            )
-    except Exception as e:
-        logger.warning("결제 알림 환율 그래프 발송 실패 (무시): %s", e)
+    # 환율 변동폭 그래프는 D-7에서만 발송 (D-3/월간 리포트와 중복 발송 방지)
+    if days_until == 7:
+        try:
+            _send_rate_graphs(cfg, today, fx_rate, cache_kv=True)
+        except Exception as e:
+            logger.warning("결제 알림 환율 그래프 발송 실패 (무시): %s", e)
 
     history = load_history()
     carryover = previous_carryover(history)
@@ -196,15 +172,25 @@ def run_monthly_report(cfg: Config, today: date) -> int:
 
 
 def run_rate_graph(cfg: Config, today: date) -> int:
-    """최근 1개월·3개월 환율 그래프 2장을 생성해 Discord에 발송."""
-    from .graph_generator import generate_fx_graph
-
+    """최근 1개월·3개월 환율 그래프 2장을 생성해 Discord에 발송 (수동 실행 전용)."""
     fx_rate = fetch_usd_krw_rate(cfg.koreaexim_api_key)
-    # 3개월(약 90 영업일) 이력 조회
-    history = fetch_usd_krw_history(cfg.koreaexim_api_key, business_days=90)
-    if not history:
+    if not _send_rate_graphs(cfg, today, fx_rate, cache_kv=True):
         logger.error("환율 이력 데이터를 가져올 수 없습니다.")
         return 1
+    return 0
+
+
+def _send_rate_graphs(cfg: Config, today: date, fx_rate: float, *, cache_kv: bool) -> bool:
+    """최근 1개월·3개월 환율 그래프 2장을 생성해 Discord에 발송.
+
+    cache_kv=True면 /rate 커맨드가 즉시 반환할 수 있도록 KV에도 캐시 저장.
+    이력 데이터를 가져오지 못하면 아무것도 보내지 않고 False 반환.
+    """
+    from .graph_generator import generate_fx_graph
+
+    history = fetch_usd_krw_history(cfg.koreaexim_api_key, business_days=90)
+    if not history:
+        return False
 
     # API는 11시 이전 당일 데이터를 제공하지 않으므로 오늘 값을 명시적으로 포함
     if history[-1][0] != today.isoformat():
@@ -217,9 +203,6 @@ def run_rate_graph(cfg: Config, today: date) -> int:
         rates = [r for _, r in h]
         return {"avg": sum(rates) / len(rates), "high": max(rates), "low": min(rates), "count": len(rates)}
 
-    stats_1m = _stats(history_1m)
-    stats_3m = _stats(history_3m)
-
     image_1m = generate_fx_graph(history_1m)
     image_3m = generate_fx_graph(history_3m)
 
@@ -229,13 +212,16 @@ def run_rate_graph(cfg: Config, today: date) -> int:
         image_1m=image_1m,
         image_3m=image_3m,
         fx_rate=fx_rate,
-        stats_1m=stats_1m,
-        stats_3m=stats_3m,
+        stats_1m=_stats(history_1m),
+        stats_3m=_stats(history_3m),
     )
-    # KV 캐시: /rate 커맨드는 1M 그래프를 반환
-    _save_rate_snapshot_to_kv(cfg, fx_rate, history_1m, today)
-    _cache_rate_graph_to_kv(cfg, image_1m)
-    return 0
+
+    if cache_kv:
+        # KV 캐시: /rate 커맨드는 1M 그래프를 반환
+        _save_rate_snapshot_to_kv(cfg, fx_rate, history_1m, today)
+        _cache_rate_graph_to_kv(cfg, image_1m)
+
+    return True
 
 
 def _get_or_lock_billing_rate(cfg: Config, billing_date: date, spot_rate: float) -> float:

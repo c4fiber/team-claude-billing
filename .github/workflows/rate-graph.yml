@@ -1,9 +1,9 @@
 name: Rate Graph
 
 # 수동 실행 전용 — 환율 그래프 생성 및 KV 캐시 저장.
-# 자동 발송은 schedule.yml(auto 모드)이 담당합니다:
-#   - 매월 1일  → monthly-report + rate-graph (schedule.yml)
-#   - D-0       → rate-graph (schedule.yml)
+# 자동 발송은 schedule.yml(auto 모드)이 담당하며, 그래프는 D-7 결제 알림에만
+# 포함됩니다(월 1회). /rate 커맨드용 KV 캐시를 그 전에 미리 갱신하고 싶을 때
+# 이 워크플로우를 수동 실행하세요.
 #
 # 이 워크플로우가 하는 일:
 #   1. Korea Exim Bank API로 최근 1개월·3개월 USD/KRW 환율 조회
